@@ -26,20 +26,30 @@ CSS = """
     linear-gradient(135deg, #020617 0%, #08111f 48%, #050814 100%) !important;
   color: #e5e7eb !important;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  max-width: 1280px !important;
+  margin: 0 auto !important;
+  padding: 28px 24px 44px !important;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 6%, rgba(14, 165, 233, .2), transparent 32%),
+    radial-gradient(circle at 90% 4%, rgba(109, 40, 217, .2), transparent 34%),
+    #020617 !important;
 }
 
 .hero {
   border: 1px solid var(--studio-border);
   border-radius: 28px;
-  padding: 34px;
+  padding: 30px;
   background: linear-gradient(135deg, rgba(15,23,42,.88), rgba(2,6,23,.72));
   box-shadow: 0 24px 90px rgba(0, 0, 0, .42);
 }
 
 .hero h1 {
   margin: 0;
-  font-size: clamp(2.2rem, 6vw, 5.2rem);
-  line-height: .92;
+  font-size: clamp(2.2rem, 4.8vw, 4.35rem);
+  line-height: .94;
   letter-spacing: -0.06em;
 }
 
