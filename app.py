@@ -105,14 +105,18 @@ CSS = """
   color: rgba(148, 163, 184, .68) !important;
 }
 
-#download_glb .empty.large {
-  min-height: 86px !important;
-  height: 86px !important;
+#download_glb .empty.large,
+#download_glb .empty.large.unpadded_box,
+#download_glb [aria-label="Empty value"].large {
+  min-height: 58px !important;
+  height: 58px !important;
+  max-height: 58px !important;
+  padding: 0 !important;
 }
 
 #download_glb .empty .icon {
-  width: 28px !important;
-  height: 28px !important;
+  width: 20px !important;
+  height: 20px !important;
   opacity: .55 !important;
 }
 
@@ -191,7 +195,7 @@ with gr.Blocks(title=TITLE) as demo:
             download = gr.File(
                 label="Download GLB",
                 file_types=[".glb"],
-                height=110,
+                height=76,
                 elem_id="download_glb",
             )
             metadata = gr.Markdown("### Generation metadata\nUpload an image and generate an asset.")
