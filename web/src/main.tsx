@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -43,7 +43,77 @@ type Asset = {
   score: number;
   createdAt: string;
   kind: "drone" | "crate" | "mech" | "console" | "platform" | "core";
+  backend?: BackendAsset;
 };
+
+type BackendAsset = {
+  asset_id: string;
+  created_at: string;
+  provider_name?: string;
+  provider?: string;
+  provider_type?: string;
+  model_backend?: string;
+  quality_preset?: Quality;
+  mesh_style?: MeshStyle;
+  seed?: number;
+  notes?: string;
+  dominant_color?: string;
+  file_size_bytes?: number;
+  status?: string;
+  overall_quality_score?: number;
+  limitations?: string;
+  future_backends?: string[];
+  quality_report?: {
+    geometry_score?: number;
+    topology_score?: number;
+    material_score?: number;
+    metadata_score?: number;
+    reproducibility_score?: number;
+    overall_score?: number;
+    warnings?: string[];
+  };
+  activity_log?: { event: string; detail: string; timestamp: string }[];
+  urls?: {
+    glb?: string | null;
+    metadata?: string | null;
+    quality_report?: string | null;
+    package_zip?: string | null;
+    input_image?: string | null;
+    activity_log?: string | null;
+  };
+};
+
+const API_BASE = "http://127.0.0.1:8000";
+
+function fileUrl(path?: string | null) {
+  if (!path) return undefined;
+  return path.startsWith("http") ? path : `${API_BASE}${path}`;
+}
+
+function formatDate(value?: string) {
+  if (!value) return "Not generated yet";
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+}
+
+function assetKind(asset: BackendAsset): Asset["kind"] {
+  const style = asset.mesh_style || "";
+  if (style === "Soft object") return "core";
+  if (style === "Product preview") return "crate";
+  return "drone";
+}
+
+function toUiAsset(asset: BackendAsset): Asset {
+  return {
+    id: asset.asset_id,
+    name: asset.asset_id.replace(/^asset_/, "Asset "),
+    style: asset.mesh_style || "Generated Asset",
+    provider: asset.provider_name || asset.provider || "Local Demo",
+    score: asset.quality_report?.overall_score || asset.overall_quality_score || 0,
+    createdAt: formatDate(asset.created_at),
+    kind: assetKind(asset),
+    backend: asset,
+  };
+}
 
 const assets: Asset[] = [
   { id: "asset_7f3a9c1e", name: "Drone Mark IV", style: "Hard Surface", provider: "Local Demo", score: 92, createdAt: "May 24, 2026", kind: "drone" },
@@ -74,14 +144,43 @@ function App() {
   const [seed, setSeed] = useState("482742");
   const [notes, setNotes] = useState("Clean topology, deterministic demo mesh, provider-aware metadata.");
   const [selectedAsset, setSelectedAsset] = useState<Asset>(assets[0]);
+  const [backendAssets, setBackendAssets] = useState<BackendAsset[]>([]);
+  const [generatedAsset, setGeneratedAsset] = useState<BackendAsset | null>(null);
+  const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking");
+
+  const uiAssets = backendAssets.length > 0 ? backendAssets.map(toUiAsset) : assets;
+
+  async function refreshAssets() {
+    const response = await fetch(`${API_BASE}/api/assets`);
+    if (!response.ok) throw new Error("Could not load assets");
+    const data = await response.json();
+    const nextAssets = data.assets || [];
+    setBackendAssets(nextAssets);
+    if (nextAssets.length > 0) {
+      setSelectedAsset(toUiAsset(nextAssets[0]));
+    }
+  }
+
+  useEffect(() => {
+    async function boot() {
+      try {
+        const health = await fetch(`${API_BASE}/api/health`);
+        setApiStatus(health.ok ? "online" : "offline");
+        if (health.ok) await refreshAssets();
+      } catch {
+        setApiStatus("offline");
+      }
+    }
+    void boot();
+  }, []);
 
   return (
     <main className="app-shell">
       <Sidebar screen={screen} setScreen={setScreen} />
       <section className="workspace">
-        <Topbar />
+        <Topbar apiStatus={apiStatus} />
         {screen === "generate" && (
-          <GenerateScreen
+          <GenerateScreenConnected
             quality={quality}
             setQuality={setQuality}
             meshStyle={meshStyle}
@@ -90,9 +189,18 @@ function App() {
             setSeed={setSeed}
             notes={notes}
             setNotes={setNotes}
+            generatedAsset={generatedAsset}
+            setGeneratedAsset={setGeneratedAsset}
+            onGenerated={async (asset) => {
+              setGeneratedAsset(asset);
+              setScreen("generate");
+              await refreshAssets();
+              setSelectedAsset(toUiAsset(asset));
+            }}
+            apiStatus={apiStatus}
           />
         )}
-        {screen === "assets" && <AssetsScreen selected={selectedAsset} setSelected={setSelectedAsset} />}
+        {screen === "assets" && <AssetsScreen selected={selectedAsset} setSelected={setSelectedAsset} assets={uiAssets} />}
         {screen === "agents" && <AgentsScreen />}
         {screen === "providers" && <ProvidersScreen />}
         {screen === "settings" && <SettingsScreen />}
@@ -152,13 +260,13 @@ function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Sc
   );
 }
 
-function Topbar() {
+function Topbar({ apiStatus }: { apiStatus: "checking" | "online" | "offline" }) {
   return (
     <header className="topbar">
       <Dropdown label="Provider" value="Local Demo (Active)" active />
       <Dropdown label="Project" value="Sci-Fi Drone" icon={<Folder size={16} />} />
       <div className="topbar-spacer" />
-      <div className="system-pill"><i /> All systems operational</div>
+      <div className="system-pill"><i /> API {apiStatus === "online" ? "connected" : apiStatus}</div>
       <button className="icon-btn"><CircleHelp size={20} /></button>
       <button className="icon-btn badge-dot"><Bell size={20} /></button>
       <button className="avatar">A</button>
@@ -175,6 +283,135 @@ function Dropdown({ label, value, active, icon }: { label: string; value: string
       <strong>{value}</strong>
       <ChevronDown size={16} />
     </button>
+  );
+}
+
+function GenerateScreenConnected({
+  quality,
+  setQuality,
+  meshStyle,
+  setMeshStyle,
+  seed,
+  setSeed,
+  notes,
+  setNotes,
+  generatedAsset,
+  onGenerated,
+  apiStatus,
+}: {
+  quality: Quality;
+  setQuality: (quality: Quality) => void;
+  meshStyle: MeshStyle;
+  setMeshStyle: (style: MeshStyle) => void;
+  seed: string;
+  setSeed: (seed: string) => void;
+  notes: string;
+  setNotes: (notes: string) => void;
+  generatedAsset: BackendAsset | null;
+  setGeneratedAsset: (asset: BackendAsset | null) => void;
+  onGenerated: (asset: BackendAsset) => Promise<void>;
+  apiStatus: "checking" | "online" | "offline";
+}) {
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState("");
+  const displayScore = generatedAsset?.quality_report?.overall_score || generatedAsset?.overall_quality_score || 92;
+  const displayAssetName = generatedAsset ? `${generatedAsset.asset_id}.glb` : "asset_482742.glb";
+
+  async function handleGenerate() {
+    if (!sourceFile) {
+      setError("Choose a source image first.");
+      fileInput.current?.click();
+      return;
+    }
+    if (apiStatus !== "online") {
+      setError("Python API is offline. Start uvicorn on port 8000 first.");
+      return;
+    }
+
+    setError("");
+    setIsGenerating(true);
+    const form = new FormData();
+    form.append("image", sourceFile);
+    form.append("quality_preset", quality);
+    form.append("mesh_style", meshStyle);
+    form.append("seed", String(Number(seed) || 482742));
+    form.append("notes", notes);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/generate`, { method: "POST", body: form });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Generation failed");
+      }
+      await onGenerated(await response.json());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Generation failed");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  return (
+    <div className="generate-grid">
+      <section className="panel control-panel">
+        <PanelTitle number="1" title="Source Image" />
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
+        />
+        <div className="dropzone" onClick={() => fileInput.current?.click()}>
+          <AssetRender kind="drone" compact />
+          <div>
+            <strong>{sourceFile?.name || "Choose source image"}</strong>
+            <p>{sourceFile ? `${Math.round(sourceFile.size / 1024)} KB · local upload · workflow input` : "PNG/JPG · local upload · workflow input"}</p>
+            <button className="small-btn" type="button"><Upload size={15} /> Replace Image</button>
+          </div>
+          <button className="ghost-icon" type="button" onClick={(event) => { event.stopPropagation(); setSourceFile(null); }}>
+            <X size={17} />
+          </button>
+          <span>Drag & drop an image here, or click to browse</span>
+        </div>
+
+        <PanelTitle number="2" title="Generation Settings" />
+        <Segmented label="Quality" values={["Draft", "Balanced", "High"]} value={quality} onChange={(v) => setQuality(v as Quality)} />
+        <Segmented label="Mesh Style" values={["Soft object", "Hard surface", "Product preview"]} value={meshStyle} onChange={(v) => setMeshStyle(v as MeshStyle)} />
+        <LabeledInput label="Seed" value={seed} onChange={setSeed} icon={<Cuboid size={17} />} />
+        <label className="notes-field">
+          <span>Notes <small>(optional)</small></span>
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} />
+          <em>{notes.length}/500</em>
+        </label>
+        {error && <p className="inline-error">{error}</p>}
+        <button className="primary-action" onClick={handleGenerate} disabled={isGenerating}>
+          <Sparkles size={24} /> {isGenerating ? "Generating..." : "Generate 3D Asset"}
+        </button>
+      </section>
+
+      <section className="panel preview-panel">
+        <div className="panel-header">
+          <h3><Box size={18} /> Preview <span>· {displayAssetName}</span></h3>
+          <div className="header-actions"><button>GLB</button><button>•••</button></div>
+        </div>
+        <div className="hero-preview">
+          <AssetRender kind={generatedAsset ? assetKind(generatedAsset) : "drone"} />
+          <div className="axis-widget"><span>X</span><span>Y</span><span>Z</span></div>
+          <div className="preview-tools">
+            <button><Archive size={18} /></button>
+            <button><Gauge size={18} /></button>
+            <button><Package size={18} /></button>
+          </div>
+          <div className="preview-dots">{Array.from({ length: 7 }).map((_, i) => <i key={i} className={i === 0 ? "on" : ""} />)}</div>
+        </div>
+      </section>
+
+      <SummaryCards asset={generatedAsset} score={displayScore} />
+      <ActivityTimeline activity={generatedAsset?.activity_log} />
+    </div>
   );
 }
 
@@ -285,33 +522,51 @@ function LabeledInput({ label, value, onChange, icon }: { label: string; value: 
   );
 }
 
-function SummaryCards() {
+function SummaryCards({ asset, score = 92 }: { asset?: BackendAsset | null; score?: number }) {
+  const quality = asset?.quality_report || {};
+  const openFile = (path?: string | null) => {
+    const url = fileUrl(path);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <section className="summary-grid">
       <div className="panel summary-card">
         <h3>Generation Summary</h3>
         <dl>
-          <dt>Provider</dt><dd>Local Demo</dd>
-          <dt>Backend</dt><dd>procedural-glb-demo</dd>
-          <dt>Status</dt><dd>Completed</dd>
-          <dt>Generated</dt><dd>May 15, 2026</dd>
+          <dt>Provider</dt><dd>{asset?.provider_name || "Local Demo"}</dd>
+          <dt>Backend</dt><dd>{asset?.model_backend || "procedural-glb-demo"}</dd>
+          <dt>Status</dt><dd>{asset?.status || "Ready"}</dd>
+          <dt>Generated</dt><dd>{formatDate(asset?.created_at)}</dd>
           <dt>Package</dt><dd>GLB + JSON + ZIP</dd>
         </dl>
       </div>
       <div className="panel quality-card">
         <h3>Quality Score</h3>
-        <ScoreRing score={92} />
+        <ScoreRing score={score} />
         <div className="bars">
           {["Geometry", "Topology", "Material", "Metadata", "Overall"].map((label, i) => (
-            <div key={label}><span>{label}</span><i><b style={{ width: `${[94, 91, 86, 96, 92][i]}%` }} /></i><em>{[94, 91, 86, 96, 92][i]}</em></div>
+            <div key={label}><span>{label}</span><i><b style={{ width: `${[
+              quality.geometry_score || 94,
+              quality.topology_score || 91,
+              quality.material_score || 86,
+              quality.metadata_score || 96,
+              score,
+            ][i]}%` }} /></i><em>{[
+              quality.geometry_score || 94,
+              quality.topology_score || 91,
+              quality.material_score || 86,
+              quality.metadata_score || 96,
+              score,
+            ][i]}</em></div>
           ))}
         </div>
       </div>
       <div className="panel download-card">
         <h3>Download</h3>
         <p>Download the asset or the complete package with metadata and quality report.</p>
-        <button className="download-main"><Download size={20} /> Download GLB</button>
-        <button className="export-btn"><Package size={18} /> Download Asset Package <ChevronDown size={16} /></button>
+        <button className="download-main" onClick={() => openFile(asset?.urls?.glb)} disabled={!asset?.urls?.glb}><Download size={20} /> Download GLB</button>
+        <button className="export-btn" onClick={() => openFile(asset?.urls?.package_zip)} disabled={!asset?.urls?.package_zip}><Package size={18} /> Download Asset Package <ChevronDown size={16} /></button>
       </div>
     </section>
   );
@@ -325,14 +580,21 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-function ActivityTimeline() {
+function ActivityTimeline({ activity }: { activity?: BackendAsset["activity_log"] }) {
+  const rows = activity?.length
+    ? activity.map((item) => [
+      item.event.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(item.timestamp)),
+    ])
+    : timeline;
+
   return (
     <section className="panel activity-panel">
       <div className="panel-header"><h3><Activity size={18} /> Activity Log</h3><button>View full log</button></div>
       <div className="timeline">
-        {timeline.map(([label, time], index) => (
+        {rows.map(([label, time], index) => (
           <div className="timeline-item" key={label}>
-            <b className={index === timeline.length - 1 ? "done" : ""}>{index === timeline.length - 1 ? <Check size={16} /> : <FileJson size={15} />}</b>
+            <b className={index === rows.length - 1 ? "done" : ""}>{index === rows.length - 1 ? <Check size={16} /> : <FileJson size={15} />}</b>
             <span>{label}</span>
             <small>{time}</small>
           </div>
@@ -342,7 +604,12 @@ function ActivityTimeline() {
   );
 }
 
-function AssetsScreen({ selected, setSelected }: { selected: Asset; setSelected: (asset: Asset) => void }) {
+function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setSelected: (asset: Asset) => void; assets: Asset[] }) {
+  const openFile = (path?: string | null) => {
+    const url = fileUrl(path);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="assets-layout">
       <section className="assets-main">
@@ -353,7 +620,7 @@ function AssetsScreen({ selected, setSelected }: { selected: Asset; setSelected:
         </div>
         <div className="asset-title-row">
           <div><h2>Assets</h2><p>Browse and manage your generated 3D assets.</p></div>
-          <span>84 assets</span>
+          <span>{assets.length} assets</span>
         </div>
         <div className="asset-content">
           <aside className="filters panel">
@@ -380,8 +647,13 @@ function AssetsScreen({ selected, setSelected }: { selected: Asset; setSelected:
         <div className="inspector-tabs"><button className="selected">Overview</button><button>History</button><button>Files</button></div>
         <div className="inspector-grid">
           <div className="panel metric-panel"><h3>Quality Score</h3><ScoreRing score={selected.score} /></div>
-          <div className="panel details-panel"><h3>Asset Details</h3><dl><dt>Mesh Style</dt><dd>{selected.style}</dd><dt>Provider</dt><dd>{selected.provider}</dd><dt>File Size</dt><dd>48.7 MB</dd><dt>Status</dt><dd>Completed</dd></dl></div>
-          <div className="panel export-panel"><h3>Download & Export</h3><button className="download-main"><Download size={18} /> Download GLB</button><button className="export-btn">metadata.json</button><button className="export-btn">quality_report.json</button></div>
+          <div className="panel details-panel"><h3>Asset Details</h3><dl><dt>Mesh Style</dt><dd>{selected.style}</dd><dt>Provider</dt><dd>{selected.provider}</dd><dt>File Size</dt><dd>{selected.backend?.file_size_bytes ? `${Math.round(selected.backend.file_size_bytes / 1024)} KB` : "Demo"}</dd><dt>Status</dt><dd>{selected.backend?.status || "Completed"}</dd></dl></div>
+          <div className="panel export-panel">
+            <h3>Download & Export</h3>
+            <button className="download-main" onClick={() => openFile(selected.backend?.urls?.glb)} disabled={!selected.backend?.urls?.glb}><Download size={18} /> Download GLB</button>
+            <button className="export-btn" onClick={() => openFile(selected.backend?.urls?.metadata)} disabled={!selected.backend?.urls?.metadata}>metadata.json</button>
+            <button className="export-btn" onClick={() => openFile(selected.backend?.urls?.quality_report)} disabled={!selected.backend?.urls?.quality_report}>quality_report.json</button>
+          </div>
         </div>
       </aside>
     </div>

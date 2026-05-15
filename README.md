@@ -109,12 +109,29 @@ Future provider targets:
 
 ## Run Locally
 
-Backend/demo Gradio app:
+Install dependencies:
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Backend API for the premium React cockpit:
+
+```bash
+uvicorn api:app --host 127.0.0.1 --port 8000
+```
+
+Open API health check:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+Optional Gradio demo app:
+
+```bash
 python app.py
 ```
 
@@ -139,6 +156,8 @@ http://127.0.0.1:5173
 ```
 
 The React UI is the premium product shell inspired by high-end AI infrastructure dashboards. The Python/Gradio app remains the working local generation demo.
+
+The React cockpit calls the FastAPI backend at `http://127.0.0.1:8000`. A generation request uploads the source image to the API and receives real output links for `asset.glb`, `metadata.json`, `quality_report.json`, `activity_log.json`, and `package.zip`.
 
 ## Deploy as Hugging Face Space
 
