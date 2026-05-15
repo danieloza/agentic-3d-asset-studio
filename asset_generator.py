@@ -1,161 +1,128 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
-import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
-import numpy as np
-from PIL import Image
-import trimesh
+from providers import AssetGenerationRequest, AssetGenerationResult, LocalDemoProvider
 
 
-Quality = Literal["Draft", "Balanced", "High"]
-MeshStyle = Literal["Soft object", "Hard surface", "Product preview"]
+OUTPUT_ROOT = Path("outputs")
+LOCAL_PROVIDER = LocalDemoProvider()
 
 
 @dataclass(frozen=True)
 class GenerationRequest:
     image_path: str
-    quality: Quality
+    quality: str
     seed: int
-    mesh_style: MeshStyle
+    mesh_style: str
     notes: str = ""
 
 
-@dataclass(frozen=True)
-class GenerationResult:
-    asset_path: str
-    metadata: dict
-
-
-def _dominant_color(image_path: str) -> tuple[float, float, float, float]:
-    image = Image.open(image_path).convert("RGBA")
-    image.thumbnail((96, 96))
-    pixels = np.asarray(image).reshape(-1, 4)
-    visible = pixels[pixels[:, 3] > 24]
-    if len(visible) == 0:
-        return (0.2, 0.55, 1.0, 1.0)
-    rgb = np.median(visible[:, :3], axis=0) / 255.0
-    return (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
-
-
-def _image_fingerprint(image_path: str) -> str:
-    with open(image_path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()[:16]
-
-
-def _make_soft_object(seed: int, detail: int) -> trimesh.Trimesh:
-    rng = np.random.default_rng(seed)
-    mesh = trimesh.creation.icosphere(subdivisions=detail, radius=1.0)
-    vertices = mesh.vertices.copy()
-    noise = rng.normal(0, 0.08, size=(len(vertices), 1))
-    wave = np.sin(vertices[:, 0:1] * 3.1 + seed % 7) * 0.06
-    vertices *= 1.0 + noise + wave
-    mesh.vertices = vertices
-    return mesh
-
-
-def _make_hard_surface(seed: int) -> trimesh.Trimesh:
-    rng = np.random.default_rng(seed)
-    base = trimesh.creation.box(extents=(1.6, 1.0, 0.45))
-    pieces = [base]
-    for index in range(5):
-        width = float(rng.uniform(0.15, 0.42))
-        depth = float(rng.uniform(0.12, 0.32))
-        height = float(rng.uniform(0.08, 0.28))
-        part = trimesh.creation.box(extents=(width, depth, height))
-        part.apply_translation(
-            (
-                float(rng.uniform(-0.65, 0.65)),
-                float(rng.uniform(-0.35, 0.35)),
-                0.26 + height / 2 + index * 0.015,
-            )
-        )
-        pieces.append(part)
-    return trimesh.util.concatenate(pieces)
-
-
-def _make_product_preview(seed: int, detail: int) -> trimesh.Trimesh:
-    rng = np.random.default_rng(seed)
-    radius = float(rng.uniform(0.42, 0.58))
-    height = float(rng.uniform(1.1, 1.45))
-    mesh = trimesh.creation.cylinder(radius=radius, height=height, sections=48 + detail * 16)
-    bevel = trimesh.creation.torus(major_radius=radius * 0.9, minor_radius=0.045)
-    bevel.apply_translation((0, 0, height / 2))
-    return trimesh.util.concatenate([mesh, bevel])
-
-
-def _add_preview_stage(mesh: trimesh.Trimesh) -> trimesh.Scene:
-    stage = trimesh.creation.cylinder(radius=1.25, height=0.08, sections=64)
-    stage.apply_translation((0, 0, -0.78))
-    stage.visual.vertex_colors = np.tile([18, 28, 48, 255], (len(stage.vertices), 1))
-    scene = trimesh.Scene()
-    scene.add_geometry(stage, node_name="preview_stage")
-    scene.add_geometry(mesh, node_name="generated_asset")
-    return scene
-
-
-def generate_asset(request: GenerationRequest) -> GenerationResult:
-    detail_by_quality: dict[Quality, int] = {"Draft": 1, "Balanced": 2, "High": 3}
-    detail = detail_by_quality[request.quality]
-
-    if request.mesh_style == "Soft object":
-        mesh = _make_soft_object(request.seed, detail)
-    elif request.mesh_style == "Hard surface":
-        mesh = _make_hard_surface(request.seed)
-    else:
-        mesh = _make_product_preview(request.seed, detail)
-
-    color = _dominant_color(request.image_path)
-    vertex_color = [int(channel * 255) for channel in color]
-    mesh.visual.vertex_colors = np.tile(vertex_color, (len(mesh.vertices), 1))
-
-    angle = math.radians(18)
-    mesh.apply_transform(
-        trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
+def generate_asset(request: GenerationRequest) -> AssetGenerationResult:
+    provider_request = AssetGenerationRequest(
+        input_image=Path(request.image_path),
+        quality_preset=request.quality,  # type: ignore[arg-type]
+        seed=int(request.seed),
+        mesh_style=request.mesh_style,  # type: ignore[arg-type]
+        notes=request.notes,
     )
+    return LOCAL_PROVIDER.generate_asset(provider_request, OUTPUT_ROOT)
 
-    output_dir = Path(tempfile.mkdtemp(prefix="agentic_3d_asset_"))
-    asset_path = output_dir / "generated_asset.glb"
-    scene = _add_preview_stage(mesh)
-    scene.export(asset_path)
 
-    metadata = {
-        "provider": "local-demo-generator",
-        "model_backend": "procedural-glb-demo",
-        "image_fingerprint": _image_fingerprint(request.image_path),
-        "quality": request.quality,
-        "mesh_style": request.mesh_style,
-        "seed": request.seed,
-        "notes": request.notes.strip(),
-        "limitations": [
-            "This local provider creates a deterministic demo mesh.",
-            "Swap the provider adapter with TRELLIS, TripoSR, Stable Fast 3D, InstantMesh, or a private endpoint for real image-to-3D inference.",
-        ],
-    }
+def load_assets() -> list[dict]:
+    assets_root = OUTPUT_ROOT / "assets"
+    if not assets_root.exists():
+        return []
 
-    (output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    return GenerationResult(asset_path=str(asset_path), metadata=metadata)
+    assets: list[dict] = []
+    for metadata_path in sorted(assets_root.glob("*/metadata.json"), reverse=True):
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        assets.append(metadata)
+    return sorted(assets, key=lambda item: item.get("created_at", ""), reverse=True)
+
+
+def asset_table_rows() -> list[list[str | int]]:
+    rows: list[list[str | int]] = []
+    for asset in load_assets():
+        rows.append(
+            [
+                asset.get("asset_id", ""),
+                asset.get("created_at", ""),
+                asset.get("provider", ""),
+                asset.get("quality_preset", ""),
+                asset.get("mesh_style", ""),
+                int(asset.get("overall_quality_score", 0)),
+                asset.get("status", ""),
+                int(asset.get("file_size_bytes", 0)),
+                asset.get("glb_path", ""),
+                asset.get("metadata_path", ""),
+                asset.get("quality_report_path", ""),
+                asset.get("package_zip_path", ""),
+            ]
+        )
+    return rows
+
+
+def get_asset(asset_id: str) -> dict | None:
+    if not asset_id:
+        return None
+    metadata_path = OUTPUT_ROOT / "assets" / asset_id / "metadata.json"
+    if not metadata_path.exists():
+        return None
+    return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+
+def latest_asset() -> dict | None:
+    assets = load_assets()
+    return assets[0] if assets else None
 
 
 def metadata_markdown(metadata: dict) -> str:
     lines = [
         "### Generation metadata",
-        f"- Provider: `{metadata['provider']}`",
+        f"- Asset ID: `{metadata['asset_id']}`",
+        f"- Provider: `{metadata['provider_name']}` (`{metadata['provider_type']}`)",
         f"- Backend: `{metadata['model_backend']}`",
-        f"- Image fingerprint: `{metadata['image_fingerprint']}`",
-        f"- Quality: `{metadata['quality']}`",
+        f"- Status: `{metadata['status']}`",
+        f"- Quality preset: `{metadata['quality_preset']}`",
         f"- Mesh style: `{metadata['mesh_style']}`",
         f"- Seed: `{metadata['seed']}`",
+        f"- Dominant color: `{metadata['dominant_color']}`",
+        f"- File size: `{metadata['file_size_bytes']}` bytes",
+        "",
+        "**Limitations**",
+        f"- {metadata['limitations']}",
+        f"- Future backend targets: {', '.join(metadata['future_backends'])}",
     ]
     if metadata.get("notes"):
-        lines.append(f"- Notes: {metadata['notes']}")
-    lines.append("")
-    lines.append("**Limitations**")
-    for limitation in metadata["limitations"]:
-        lines.append(f"- {limitation}")
+        lines.insert(9, f"- Notes: {metadata['notes']}")
+    return "\n".join(lines)
+
+
+def quality_markdown(quality_report: dict) -> str:
+    return "\n".join(
+        [
+            "### Quality score",
+            f"## {quality_report['overall_score']} / 100",
+            f"- Geometry: `{quality_report['geometry_score']}`",
+            f"- Topology: `{quality_report['topology_score']}`",
+            f"- Material: `{quality_report['material_score']}`",
+            f"- Metadata: `{quality_report['metadata_score']}`",
+            f"- Reproducibility: `{quality_report['reproducibility_score']}`",
+            "",
+            "**Warnings**",
+            *[f"- {warning}" for warning in quality_report["warnings"]],
+        ]
+    )
+
+
+def activity_markdown(activity_log: list[dict]) -> str:
+    lines = ["### Activity log"]
+    for item in activity_log:
+        lines.append(f"- `{item['timestamp']}` - **{item['event']}**: {item['detail']}")
     return "\n".join(lines)

@@ -1,42 +1,85 @@
 # Agent Instructions - Agentic 3D Asset Studio
 
-Use this Space to generate or retrieve a 3D `.glb` asset from an uploaded image.
+Use this Space as an agent-ready 3D asset generation workflow.
 
-## Intended Use
+## Tool
 
-- Generate previewable 3D assets from product, object, or concept images.
-- Export `.glb` files for downstream 3D workflows.
-- Keep a clear metadata trail of generation settings and provider behavior.
+`generate_3d_asset`
 
-## Safety and Trust
+## Current Provider
 
-- Review generated geometry before using it in production.
-- Do not upload confidential, copyrighted, or personal images unless you have permission.
-- Treat the current local provider as a demo generator, not a production image-to-3D model.
+```json
+{
+  "provider": "local_demo",
+  "provider_name": "Local Demo Provider",
+  "provider_type": "deterministic_demo",
+  "model_backend": "procedural-glb-demo",
+  "status": "active"
+}
+```
 
-## Inputs
+Important: the current provider does **not** run a real foundation image-to-3D model. It creates deterministic demo GLB assets for workflow validation, UI testing, packaging, metadata and agent orchestration.
 
-- `image`: uploaded image file
-- `quality`: `Draft`, `Balanced`, or `High`
-- `seed`: integer seed for deterministic demo generation
-- `mesh_style`: `Soft object`, `Hard surface`, or `Product preview`
-- `notes`: optional prompt/context for downstream model adapters
+## Input Schema
 
-## Output
+```json
+{
+  "image": "uploaded image file",
+  "quality_preset": "Draft | Balanced | High",
+  "mesh_style": "Soft object | Hard surface | Product preview",
+  "seed": 1234,
+  "notes": "optional generation context"
+}
+```
 
-- generated `.glb` file
-- generation metadata summary
+## Output Schema
 
-## Recommended Agent Flow
+```json
+{
+  "asset_id": "asset_xxxxxxxxxx",
+  "asset_glb": "outputs/assets/{asset_id}/asset.glb",
+  "metadata_json": "outputs/assets/{asset_id}/metadata.json",
+  "quality_report_json": "outputs/assets/{asset_id}/quality_report.json",
+  "activity_log_json": "outputs/assets/{asset_id}/activity_log.json",
+  "package_zip": "outputs/assets/{asset_id}/package.zip",
+  "provider": "local_demo",
+  "provider_type": "deterministic_demo",
+  "limitations": "This local provider generates deterministic demo GLB files and does not run a foundation image-to-3D model."
+}
+```
 
-1. Validate that the user has rights to use the image.
-2. Upload the image.
-3. Use `Balanced` quality for normal previews.
-4. Use `High` only when the user explicitly asks for a more detailed asset.
-5. Download and inspect the `.glb`.
-6. Report generation settings and limitations to the user.
+## Required Workflow
 
-## Example CLI Retrieval
+1. Confirm that the user has the right to use the input image.
+2. Upload the source image.
+3. Select a quality preset.
+4. Select a mesh style.
+5. Generate the asset.
+6. Read `metadata.json`.
+7. Read `quality_report.json`.
+8. Return the `.glb` and `package.zip`.
+9. Report provider, provider type and limitations.
+
+## Safety Constraints
+
+- Do not claim real AI image-to-3D generation unless a real provider is configured.
+- Do not claim the asset is production-ready, game-ready, CAD-ready or commerce-ready without human review.
+- Do not upload confidential, copyrighted, personal, or sensitive images without permission.
+- Always return metadata and quality report together with the GLB.
+- Always disclose that Local Demo Provider is deterministic and not a foundation model.
+
+## Future Backends
+
+The provider interface is prepared for future adapters:
+
+- TRELLIS
+- TripoSR
+- Stable Fast 3D
+- InstantMesh
+
+Do not describe any of these as active until the provider is actually configured and verified.
+
+## Example Retrieval
 
 ```bash
 curl https://huggingface.co/spaces/danieloza/agentic-3d-asset-studio/raw/main/agents.md
