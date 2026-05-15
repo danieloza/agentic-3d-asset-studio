@@ -104,33 +104,6 @@ body {
   color: #e5edf8 !important;
 }
 
-.gradio-container:not(:has(.hero)) {
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  background: #f8fafc !important;
-  color: #0f172a !important;
-}
-
-.gradio-container:not(:has(.hero)) h1,
-.gradio-container:not(:has(.hero)) h2,
-.gradio-container:not(:has(.hero)) h3,
-.gradio-container:not(:has(.hero)) p,
-.gradio-container:not(:has(.hero)) label,
-.gradio-container:not(:has(.hero)) span,
-.gradio-container:not(:has(.hero)) div {
-  color: #0f172a !important;
-  opacity: 1 !important;
-}
-
-.gradio-container:not(:has(.hero)) button,
-.gradio-container:not(:has(.hero)) select,
-.gradio-container:not(:has(.hero)) input {
-  background: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #cbd5e1 !important;
-}
-
 .panel {
   border: 1px solid var(--studio-border) !important;
   background: var(--studio-panel) !important;
@@ -191,6 +164,19 @@ body {
   color: #94a3b8;
   font-size: .9rem;
 }
+"""
+
+
+FORCE_DARK_HEAD = """
+<script>
+(function () {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("__theme") !== "dark") {
+    url.searchParams.set("__theme", "dark");
+    window.location.replace(url.toString());
+  }
+})();
+</script>
 """
 
 
@@ -282,4 +268,9 @@ For production, replace the provider adapter with a real image-to-3D backend suc
 
 
 if __name__ == "__main__":
-    demo.queue(default_concurrency_limit=2).launch(theme=THEME, css=CSS)
+    demo.queue(default_concurrency_limit=2).launch(
+        theme=THEME,
+        css=CSS,
+        head=FORCE_DARK_HEAD,
+        footer_links=[],
+    )
