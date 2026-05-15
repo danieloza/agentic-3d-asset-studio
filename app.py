@@ -76,6 +76,52 @@ CSS = """
   border-radius: 22px !important;
 }
 
+.gradio-container .form,
+.gradio-container .block,
+.gradio-container .wrap,
+.gradio-container .wrap-inner {
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+#source_image,
+#preview_model,
+#download_glb,
+#settings_panel {
+  border-radius: 18px !important;
+  overflow: hidden !important;
+}
+
+#source_image .image-container,
+#preview_model .model3d-container,
+#download_glb .file-preview,
+#download_glb .empty {
+  background: linear-gradient(135deg, rgba(15, 23, 42, .92), rgba(2, 6, 23, .86)) !important;
+}
+
+#preview_model .empty,
+#download_glb .empty {
+  min-height: 0 !important;
+  height: 100% !important;
+  color: rgba(148, 163, 184, .68) !important;
+}
+
+#download_glb .empty.large {
+  min-height: 86px !important;
+  height: 86px !important;
+}
+
+#download_glb .empty .icon {
+  width: 28px !important;
+  height: 28px !important;
+  opacity: .55 !important;
+}
+
+#preview_model .empty .icon {
+  width: 38px !important;
+  height: 38px !important;
+  opacity: .5 !important;
+}
+
 .footer-note {
   color: #94a3b8;
   font-size: .9rem;
@@ -118,9 +164,10 @@ with gr.Blocks(title=TITLE) as demo:
                 label="Source image",
                 type="filepath",
                 sources=["upload", "clipboard"],
-                height=380,
+                height=320,
+                elem_id="source_image",
             )
-            with gr.Row():
+            with gr.Row(elem_id="settings_panel"):
                 quality = gr.Radio(
                     ["Draft", "Balanced", "High"],
                     value="Balanced",
@@ -140,8 +187,13 @@ with gr.Blocks(title=TITLE) as demo:
             generate_button = gr.Button("Generate 3D Asset", variant="primary", size="lg")
 
         with gr.Column(scale=7, elem_classes=["panel"]):
-            model = gr.Model3D(label="3D preview", height=430)
-            download = gr.File(label="Download GLB", file_types=[".glb"])
+            model = gr.Model3D(label="3D preview", height=360, elem_id="preview_model")
+            download = gr.File(
+                label="Download GLB",
+                file_types=[".glb"],
+                height=110,
+                elem_id="download_glb",
+            )
             metadata = gr.Markdown("### Generation metadata\nUpload an image and generate an asset.")
 
     gr.Markdown(
