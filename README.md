@@ -109,6 +109,8 @@ Future provider targets:
 
 ## Run Locally
 
+Backend/demo Gradio app:
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
@@ -121,6 +123,22 @@ Open:
 ```text
 http://127.0.0.1:7860
 ```
+
+Premium React cockpit UI:
+
+```bash
+cd web
+npm install
+npm run dev -- --port 5173
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+The React UI is the premium product shell inspired by high-end AI infrastructure dashboards. The Python/Gradio app remains the working local generation demo.
 
 ## Deploy as Hugging Face Space
 
