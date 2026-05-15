@@ -51,6 +51,7 @@ body {
   font-size: clamp(2.2rem, 4.8vw, 4.35rem);
   line-height: .94;
   letter-spacing: -0.06em;
+  color: #e5edf8 !important;
 }
 
 .hero p {
@@ -78,6 +79,56 @@ body {
   background: linear-gradient(90deg, #22d3ee, #3b82f6, #a855f7);
   -webkit-background-clip: text;
   color: transparent;
+}
+
+.gradio-container:has(.hero) label,
+.gradio-container:has(.hero) .label-wrap span,
+.gradio-container:has(.hero) .prose,
+.gradio-container:has(.hero) .markdown,
+.gradio-container:has(.hero) h1,
+.gradio-container:has(.hero) h2,
+.gradio-container:has(.hero) h3,
+.gradio-container:has(.hero) p {
+  color: #dbeafe !important;
+}
+
+.gradio-container:has(.hero) input,
+.gradio-container:has(.hero) textarea,
+.gradio-container:has(.hero) select {
+  background: rgba(15, 23, 42, .82) !important;
+  color: #e5edf8 !important;
+  border-color: rgba(148, 163, 184, .2) !important;
+}
+
+.gradio-container:has(.hero) button {
+  color: #e5edf8 !important;
+}
+
+.gradio-container:not(:has(.hero)) {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.gradio-container:not(:has(.hero)) h1,
+.gradio-container:not(:has(.hero)) h2,
+.gradio-container:not(:has(.hero)) h3,
+.gradio-container:not(:has(.hero)) p,
+.gradio-container:not(:has(.hero)) label,
+.gradio-container:not(:has(.hero)) span,
+.gradio-container:not(:has(.hero)) div {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+.gradio-container:not(:has(.hero)) button,
+.gradio-container:not(:has(.hero)) select,
+.gradio-container:not(:has(.hero)) input {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
 }
 
 .panel {
