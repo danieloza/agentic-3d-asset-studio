@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "@google/model-viewer";
 import {
   Activity,
   Archive,
@@ -30,6 +31,28 @@ import {
   X,
 } from "lucide-react";
 import "./styles.css";
+
+declare module "react" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "model-viewer": React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        src?: string;
+        alt?: string;
+        poster?: string;
+        "camera-controls"?: boolean | string;
+        "auto-rotate"?: boolean | string;
+        "rotation-per-second"?: string;
+        "shadow-intensity"?: string;
+        "environment-image"?: string;
+        exposure?: string;
+        "camera-orbit"?: string;
+        "field-of-view"?: string;
+        "interaction-prompt"?: string;
+        ar?: boolean | string;
+      };
+    }
+  }
+}
 
 type Screen = "generate" | "assets" | "agents" | "providers" | "settings";
 type Quality = "Draft" | "Balanced" | "High";
@@ -157,6 +180,7 @@ function App() {
     const nextAssets = data.assets || [];
     setBackendAssets(nextAssets);
     if (nextAssets.length > 0) {
+      setGeneratedAsset(nextAssets[0]);
       setSelectedAsset(toUiAsset(nextAssets[0]));
     }
   }
@@ -398,7 +422,7 @@ function GenerateScreenConnected({
           <div className="header-actions"><button>GLB</button><button>•••</button></div>
         </div>
         <div className="hero-preview">
-          <AssetRender kind={generatedAsset ? assetKind(generatedAsset) : "drone"} />
+          <ModelPreview asset={generatedAsset} kind={generatedAsset ? assetKind(generatedAsset) : "drone"} />
           <div className="axis-widget"><span>X</span><span>Y</span><span>Z</span></div>
           <div className="preview-tools">
             <button><Archive size={18} /></button>
@@ -604,6 +628,40 @@ function ActivityTimeline({ activity }: { activity?: BackendAsset["activity_log"
   );
 }
 
+function ModelPreview({ asset, kind, compact }: { asset?: BackendAsset | null; kind: Asset["kind"]; compact?: boolean }) {
+  const src = fileUrl(asset?.urls?.glb);
+  if (!src) {
+    return (
+      <div className={`model-preview-fallback ${compact ? "compact" : ""}`}>
+        <AssetRender kind={kind} />
+        {!compact && (
+          <div className="preview-empty-note">
+            <strong>Generate an asset to load the real GLB preview</strong>
+            <span>The cockpit will render the generated <code>asset.glb</code> here.</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <model-viewer
+      className={`model-viewer ${compact ? "compact" : ""}`}
+      src={src}
+      alt={`Generated 3D asset ${asset?.asset_id || ""}`}
+      camera-controls
+      auto-rotate
+      rotation-per-second="24deg"
+      shadow-intensity="0.55"
+      environment-image="neutral"
+      exposure="1"
+      camera-orbit="38deg 62deg 6m"
+      field-of-view="28deg"
+      interaction-prompt="none"
+    />
+  );
+}
+
 function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setSelected: (asset: Asset) => void; assets: Asset[] }) {
   const openFile = (path?: string | null) => {
     const url = fileUrl(path);
@@ -643,7 +701,7 @@ function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setS
       </section>
       <aside className="asset-inspector panel">
         <div className="inspector-head"><strong>{selected.name}</strong><button><X size={18} /></button></div>
-        <div className="inspector-preview"><AssetRender kind={selected.kind} /></div>
+        <div className="inspector-preview"><ModelPreview asset={selected.backend} kind={selected.kind} compact /></div>
         <div className="inspector-tabs"><button className="selected">Overview</button><button>History</button><button>Files</button></div>
         <div className="inspector-grid">
           <div className="panel metric-panel"><h3>Quality Score</h3><ScoreRing score={selected.score} /></div>
