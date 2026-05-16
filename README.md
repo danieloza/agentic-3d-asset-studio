@@ -1,72 +1,94 @@
 # Agentic 3D Asset Studio
 
-Premium, agent-ready 3D asset generation workspace built with Python and Gradio.
+Local-first AI workflow platform for 3D asset generation.
 
-The app turns an uploaded image into a complete local asset package:
+Agentic 3D Asset Studio is not just an image upload demo. It is an application layer for AI-driven 3D asset workflows: provider abstraction, GLB generation, real browser preview, asset history, metadata, quality reports, quality gates, run replay, observability, storage inspection, ZIP export packages and agent-ready API endpoints.
+
+![Generate workspace](docs/assets/generate-workspace.png)
+
+> Current provider disclosure: the active provider is `local_demo`, a deterministic local demo provider. It does not run TRELLIS, TripoSR, Stable Fast 3D, InstantMesh or another foundation image-to-3D model. The architecture is designed so those providers can be integrated later.
+
+## Product Thesis
+
+Most image-to-3D demos stop at one action:
 
 ```text
-image upload -> provider adapter -> GLB preview -> metadata.json -> quality_report.json -> activity_log.json -> package.zip
+upload image -> generate file
 ```
 
-> Important: this project does **not** claim to train or run a proprietary foundation image-to-3D model. The active provider is a deterministic local demo generator. The architecture is prepared for future real backends such as TRELLIS, TripoSR, Stable Fast 3D, InstantMesh, or a private inference endpoint.
+Real AI asset workflows need more than that. A useful system needs reproducibility, metadata, quality checks, human review, export packages, run history and agent-readable outputs.
 
-## Product Pitch
+Agentic 3D Asset Studio focuses on that workflow layer:
 
-Agentic 3D Asset Studio is an agent-ready 3D asset generation workspace with image upload, GLB generation, browser preview, asset history, metadata, quality scoring, audit logs, ZIP export packages and agent-readable instructions.
+- human-facing product UI for generating and reviewing assets
+- FastAPI backend with structured asset endpoints
+- provider interface for local and future real image-to-3D backends
+- durable asset folders with GLB, metadata, quality reports and manifests
+- quality gates and production readiness checks
+- run replay from saved generation metadata
+- observability dashboard for workflow health
+- agent instructions and API-ready outputs
 
-It focuses on the application and workflow layer around AI asset generation:
+## Screenshots
 
-- provider abstraction
-- durable asset outputs
-- metadata and auditability
-- rule-based quality diagnostics
-- asset package export
-- agent constraints and schemas
-- premium operator-facing UI
+### Generate Workspace
+
+![Generate workspace](docs/assets/generate-workspace.png)
+
+### Assets and Storage Inspector
+
+![Assets and storage inspector](docs/assets/assets-storage-inspector.png)
+
+### Observability Dashboard
+
+![Observability dashboard](docs/assets/observability-dashboard.png)
+
+### Agent Mode
+
+![Agent mode](docs/assets/agent-mode.png)
 
 ## What It Does
 
 - uploads a source image
-- generates a deterministic demo `.glb` asset through the Local Demo Provider
-- previews the GLB in the browser with Gradio `Model3D`
-- saves every generated asset under `outputs/assets/{asset_id}/`
-- exports `metadata.json`
-- exports `quality_report.json`
-- exports `activity_log.json`
-- creates a ZIP package with all deliverables
-- lists generated assets in an Assets section
-- documents agent usage through `agents.md`
+- generates a deterministic demo `.glb` through the Local Demo Provider
+- previews the real generated GLB in the React UI with `model-viewer`
+- saves each generated asset under `outputs/assets/{asset_id}/`
+- exports `metadata.json`, `quality_report.json`, `activity_log.json` and `manifest.json`
+- creates a ZIP delivery package
+- tracks asset history and storage contents
+- supports human review states and review notes
+- supports regeneration from feedback
+- supports replaying previous runs from saved metadata
+- evaluates quality gates and readiness checks
+- exposes FastAPI endpoints for humans, tools and agents
 
 ## What It Does Not Claim
 
-This app does not claim that the generated mesh is:
+This project does not claim that the generated mesh is:
 
-- produced by TRELLIS, TripoSR, Stable Fast 3D, InstantMesh or another real image-to-3D model
-- production-ready
-- game-ready
+- produced by a real foundation image-to-3D model
+- production-ready without review
+- game-ready without review
 - CAD-ready
-- validated by a real 3D geometry QA system
+- validated by a real 3D geometry QA engine
 
-The current quality score is a **rule-based demo quality layer**. It checks workflow completeness and basic output properties. Human review is required before production use.
+The current quality score is rule-based. It checks workflow completeness, metadata, generated files and reproducibility signals. Human review is still required before production use.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    A["Image Upload"] --> B["Generate Tab"]
-    B --> C["Provider Interface"]
-    C --> D["Local Demo Provider"]
-    C -. future .-> E["TRELLIS / TripoSR / Stable Fast 3D / InstantMesh"]
-    D --> F["asset.glb"]
-    D --> G["metadata.json"]
-    D --> H["quality_report.json"]
-    D --> I["activity_log.json"]
-    F --> J["3D Preview"]
-    F --> K["package.zip"]
-    G --> K
-    H --> K
-    I --> K
-    K --> L["Agent / User Delivery"]
+flowchart TD
+    UI["React Product UI"] --> API["FastAPI Backend"]
+    API --> Provider["Provider Interface"]
+    Provider --> Local["Local Demo Provider"]
+    Provider -. "future integration" .-> Real["TRELLIS / TripoSR / Stable Fast 3D / InstantMesh"]
+    Local --> Storage["Local Asset Storage"]
+    Storage --> Files["asset.glb / metadata.json / quality_report.json / activity_log.json / manifest.json / package.zip"]
+    API --> Gates["Quality Gates"]
+    API --> Replay["Run Replay"]
+    API --> Review["Human Review"]
+    API --> Obs["Observability"]
+    API --> Agents["Agent-ready API Endpoints"]
 ```
 
 ## Output Structure
@@ -79,14 +101,17 @@ outputs/
       metadata.json
       quality_report.json
       activity_log.json
+      manifest.json
       input.png
       agent_instructions.md
       package.zip
 ```
 
-## Provider Model
+## Core Features
 
-Provider code lives in:
+### Provider Abstraction
+
+Generation is behind a provider interface:
 
 ```text
 providers/
@@ -96,9 +121,9 @@ providers/
 
 Active provider:
 
-- `Local Demo Provider`
+- `local_demo`
 - provider type: `deterministic_demo`
-- backend: `procedural-glb-demo`
+- backend: procedural GLB demo generator
 
 Future provider targets:
 
@@ -106,10 +131,89 @@ Future provider targets:
 - TripoSR
 - Stable Fast 3D
 - InstantMesh
+- private inference endpoints
+
+### Quality Gates
+
+Each asset can be checked against readiness rules:
+
+- minimum quality score
+- metadata present
+- quality report present
+- package created
+- GLB generated
+- reproducible seed saved
+- provider limitations reported
+- human review required before final use
+
+### Run Replay
+
+Previous runs can be replayed from saved metadata:
+
+- input image
+- provider
+- quality preset
+- mesh style
+- seed
+- notes
+- parent run reference
+
+This makes the workflow reproducible instead of a one-off button click.
+
+### Observability
+
+The observability dashboard summarizes:
+
+- total assets
+- completed and failed assets
+- average quality
+- provider usage
+- review states
+- storage usage
+- latest runs
+
+### Storage Inspector
+
+Each asset exposes local deliverables:
+
+- GLB file
+- metadata JSON
+- quality report
+- manifest
+- package ZIP
+- checksums and paths where available
+
+### Agent Mode
+
+The project includes `agents.md` and an Agent Mode UI describing:
+
+- tool name
+- input schema
+- output schema
+- workflow sequence
+- safe usage constraints
+- provider limitations
+
+Agents must always report that `local_demo` is a deterministic demo provider unless a real provider is configured.
+
+## API Endpoints
+
+```text
+GET  /api/health
+GET  /api/assets
+GET  /api/assets/{asset_id}
+POST /api/generate
+POST /api/assets/{asset_id}/review
+POST /api/assets/{asset_id}/regenerate
+POST /api/assets/{asset_id}/replay
+GET  /api/assets/{asset_id}/quality-gates
+GET  /api/observability
+POST /api/demo-project
+```
 
 ## Run Locally
 
-Install dependencies:
+Install Python dependencies:
 
 ```bash
 python -m venv .venv
@@ -117,19 +221,27 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Backend API for the premium React cockpit:
+Start the FastAPI backend:
 
 ```bash
 uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
-Open API health check:
+Start the React product UI:
 
-```text
-http://127.0.0.1:8000/api/health
+```bash
+cd web
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Optional Gradio demo app:
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+Optional Gradio app:
 
 ```bash
 python app.py
@@ -141,58 +253,40 @@ Open:
 http://127.0.0.1:7860
 ```
 
-Premium React cockpit UI:
+## Deploy as a Hugging Face Space
 
-```bash
-cd web
-npm install
-npm run dev -- --port 5173
-```
+The Gradio app can be deployed as a CPU Space with `app.py`.
 
-Open:
-
-```text
-http://127.0.0.1:5173
-```
-
-The React UI is the premium product shell inspired by high-end AI infrastructure dashboards. The Python/Gradio app remains the working local generation demo.
-
-The React cockpit calls the FastAPI backend at `http://127.0.0.1:8000`. A generation request uploads the source image to the API and receives real output links for `asset.glb`, `metadata.json`, `quality_report.json`, `activity_log.json`, and `package.zip`. The cockpit uses a browser GLB viewer for generated assets, so the preview panel renders the real `asset.glb` instead of a static mockup.
-
-## Deploy as Hugging Face Space
-
-Create a new Hugging Face Space:
-
-- SDK: `Gradio`
-- App file: `app.py`
-- Hardware: CPU for Local Demo Provider
-- Hardware: GPU only when adding a real image-to-3D model backend
-
-Push the repository to the Space. The app is dark-only and uses `agents.md` as an agent-readable usage guide.
-
-## Agent-Ready Workflow
-
-Agents should:
-
-1. validate that the user has rights to use the image
-2. upload the image
-3. call `generate_3d_asset`
-4. inspect metadata and quality report
-5. return the GLB and ZIP package
-6. report provider and limitations
-
-Agents must not claim real foundation image-to-3D generation unless a real provider is configured.
-
-## Screenshots
-
-Add screenshots here after deployment:
-
-```text
-docs/assets/generate-screen.png
-docs/assets/assets-screen.png
-docs/assets/agents-screen.png
-```
+Use GPU hardware only after integrating a real image-to-3D backend. The current local provider does not require GPU inference.
 
 ## Portfolio Pitch
 
-I built an agent-ready 3D asset generation workspace with image upload, GLB preview, durable asset history, provider abstraction, metadata export, rule-based quality reports, ZIP asset packages and `agents.md` instructions for automated workflows. The current provider is a deterministic local demo backend, and the architecture is prepared for real image-to-3D models such as TRELLIS, TripoSR, Stable Fast 3D or InstantMesh.
+I built Agentic 3D Asset Studio as a local-first AI workflow platform for 3D asset generation. The project combines a premium React UI, FastAPI backend, provider abstraction, GLB generation, real 3D preview, asset history, metadata, quality reports, quality gates, run replay, observability, storage inspection, ZIP export packages and agent-ready API endpoints.
+
+The current provider is intentionally honest: it is a deterministic local demo provider, not a foundation image-to-3D model. The architecture is prepared for future real providers such as TRELLIS, TripoSR, Stable Fast 3D or InstantMesh.
+
+The main engineering focus is the workflow layer around AI generation: reproducibility, review, auditability, observability, packaging and agent handoff.
+
+## Known Limitations
+
+- `local_demo` does not run a real foundation image-to-3D model.
+- Quality scoring is rule-based and should not be treated as full geometry QA.
+- Demo meshes require human review before production use.
+- Future providers need authentication, timeouts, retries and cost tracking.
+- The Gradio app is the simple local demo; the React cockpit is the primary product UI.
+
+## Future Production Improvements
+
+- integrate a real image-to-3D provider
+- add a policy engine for agent usage constraints
+- move asset registry into SQLite
+- add provider cost and latency tracking
+- add a Three.js viewer export package
+- add authentication and workspace-level permissions
+- add richer validation for mesh topology and file size
+
+## Suggested GitHub Description
+
+```text
+Agent-ready 3D asset workflow platform with FastAPI, React, GLB preview, provider abstraction, metadata, quality reports, quality gates, run replay, observability, storage inspection and API endpoints.
+```

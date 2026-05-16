@@ -9,6 +9,8 @@ import {
   Box,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Cuboid,
   Database,
@@ -54,7 +56,7 @@ declare module "react" {
   }
 }
 
-type Screen = "generate" | "assets" | "agents" | "providers" | "settings";
+type Screen = "generate" | "assets" | "observability" | "agents" | "providers" | "settings";
 type Quality = "Draft" | "Balanced" | "High";
 type MeshStyle = "Soft object" | "Hard surface" | "Product preview";
 
@@ -96,6 +98,21 @@ type BackendAsset = {
     warnings?: string[];
   };
   activity_log?: { event: string; detail: string; timestamp: string }[];
+  review_status?: string;
+  review_notes?: string;
+  parent_asset_id?: string | null;
+  feedback?: string;
+  regeneration_reason?: string | null;
+  production_readiness?: { label: string; status: "pass" | "warning" | "fail" }[];
+  checksums?: Record<string, string>;
+  quality_gates?: {
+    status: string;
+    passed: boolean;
+    checks: { label: string; passed: boolean; value?: string | number | boolean }[];
+  };
+  storage?: {
+    files: { name: string; path?: string; exists: boolean; size_bytes: number; sha256?: string }[];
+  };
   urls?: {
     glb?: string | null;
     metadata?: string | null;
@@ -103,6 +120,7 @@ type BackendAsset = {
     package_zip?: string | null;
     input_image?: string | null;
     activity_log?: string | null;
+    manifest?: string | null;
   };
 };
 
@@ -170,6 +188,8 @@ function App() {
   const [backendAssets, setBackendAssets] = useState<BackendAsset[]>([]);
   const [generatedAsset, setGeneratedAsset] = useState<BackendAsset | null>(null);
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [provider, setProvider] = useState("Local Demo (Active)");
+  const [project, setProject] = useState("Sci-Fi Drone");
 
   const uiAssets = backendAssets.length > 0 ? backendAssets.map(toUiAsset) : assets;
 
@@ -202,7 +222,7 @@ function App() {
     <main className="app-shell">
       <Sidebar screen={screen} setScreen={setScreen} />
       <section className="workspace">
-        <Topbar apiStatus={apiStatus} />
+        <Topbar apiStatus={apiStatus} provider={provider} setProvider={setProvider} project={project} setProject={setProject} screen={screen} />
         {screen === "generate" && (
           <GenerateScreenConnected
             quality={quality}
@@ -222,9 +242,12 @@ function App() {
               setSelectedAsset(toUiAsset(asset));
             }}
             apiStatus={apiStatus}
+            assets={backendAssets}
+            refreshAssets={refreshAssets}
           />
         )}
         {screen === "assets" && <AssetsScreen selected={selectedAsset} setSelected={setSelectedAsset} assets={uiAssets} />}
+        {screen === "observability" && <ObservabilityScreen assets={backendAssets} refreshAssets={refreshAssets} setGeneratedAsset={setGeneratedAsset} setScreen={setScreen} />}
         {screen === "agents" && <AgentsScreen />}
         {screen === "providers" && <ProvidersScreen />}
         {screen === "settings" && <SettingsScreen />}
@@ -234,9 +257,11 @@ function App() {
 }
 
 function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Screen) => void }) {
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const items = [
     ["generate", Sparkles, "Generate"],
     ["assets", Box, "Assets"],
+    ["observability", Activity, "Observability"],
     ["providers", Cuboid, "Providers"],
     ["agents", Users, "Agents"],
     ["settings", Settings, "Settings"],
@@ -245,12 +270,13 @@ function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Sc
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">
-          <Layers3 size={28} />
+        <div className="brand-mark danieloza-mark">
+          <img src="/danieloza-logo.png" alt="DANIELOZA logo" />
         </div>
         <div>
           <strong>Agentic 3D</strong>
           <span>Asset Studio</span>
+          <em>powered by DANIELOZA</em>
         </div>
       </div>
 
@@ -259,6 +285,7 @@ function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Sc
           <button
             key={key}
             className={`nav-item ${screen === key ? "active" : ""}`}
+            aria-label={label}
             onClick={() => setScreen(key)}
           >
             <Icon size={20} />
@@ -272,7 +299,14 @@ function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Sc
         <strong>8,420 <span>/10,000</span></strong>
         <div className="progress"><i style={{ width: "86%" }} /></div>
         <p>Resets in 12 days</p>
-        <button>Upgrade <ChevronDown size={15} /></button>
+        <button aria-label="Upgrade" onClick={() => setUpgradeOpen(!upgradeOpen)}>Upgrade <ChevronDown size={15} /></button>
+        {upgradeOpen && (
+          <div className="credit-popover">
+            <strong>Portfolio Pro Mode</strong>
+            <p>Unlocks provider routing, hosted inference adapters, team audit exports, and shared asset libraries.</p>
+            <button onClick={() => setScreen("settings")}>Configure roadmap</button>
+          </div>
+        )}
       </div>
 
       <div className="build-card">
@@ -284,29 +318,113 @@ function Sidebar({ screen, setScreen }: { screen: Screen; setScreen: (screen: Sc
   );
 }
 
-function Topbar({ apiStatus }: { apiStatus: "checking" | "online" | "offline" }) {
+function Topbar({
+  apiStatus,
+  provider,
+  setProvider,
+  project,
+  setProject,
+  screen,
+}: {
+  apiStatus: "checking" | "online" | "offline";
+  provider: string;
+  setProvider: (value: string) => void;
+  project: string;
+  setProject: (value: string) => void;
+  screen: Screen;
+}) {
+  const [panel, setPanel] = useState<"help" | "notifications" | "account" | null>(null);
+
+  useEffect(() => {
+    setPanel(null);
+  }, [screen]);
+
   return (
     <header className="topbar">
-      <Dropdown label="Provider" value="Local Demo (Active)" active />
-      <Dropdown label="Project" value="Sci-Fi Drone" icon={<Folder size={16} />} />
+      <Dropdown
+        label="Provider"
+        value={provider}
+        active
+        options={["Local Demo (Active)", "TRELLIS (Not configured)", "TripoSR (Not configured)", "InstantMesh (Not configured)"]}
+        onChange={setProvider}
+      />
+      <Dropdown
+        label="Project"
+        value={project}
+        icon={<Folder size={16} />}
+        options={["Sci-Fi Drone", "Product Preview", "Hard Surface Batch", "Internal Demo"]}
+        onChange={setProject}
+      />
       <div className="topbar-spacer" />
       <div className="system-pill"><i /> API {apiStatus === "online" ? "connected" : apiStatus}</div>
-      <button className="icon-btn"><CircleHelp size={20} /></button>
-      <button className="icon-btn badge-dot"><Bell size={20} /></button>
-      <button className="avatar">A</button>
+      <button className="icon-btn" aria-label="Help" onClick={() => setPanel(panel === "help" ? null : "help")}><CircleHelp size={20} /></button>
+      <button className="icon-btn badge-dot" aria-label="Notifications" onClick={() => setPanel(panel === "notifications" ? null : "notifications")}><Bell size={20} /></button>
+      <button className="avatar" aria-label="Workspace account" onClick={() => setPanel(panel === "account" ? null : "account")}>A</button>
+      {panel && (
+        <div className="top-popover">
+          {panel === "help" && <>
+            <strong>Help</strong>
+            <p>Upload an image, choose quality and mesh style, then generate a local demo GLB package with metadata and quality diagnostics.</p>
+            <button onClick={() => setPanel(null)}>Got it</button>
+          </>}
+          {panel === "notifications" && <>
+            <strong>Notifications</strong>
+            <p>API connected. Local Demo Provider is active. Real image-to-3D providers are not configured yet.</p>
+            <button onClick={() => setPanel(null)}>Mark as read</button>
+          </>}
+          {panel === "account" && <>
+            <strong>Workspace</strong>
+            <p>Agentic 3D Asset Studio runs locally and stores generated assets under <code>outputs/assets</code>.</p>
+            <button onClick={() => setPanel(null)}>Close</button>
+          </>}
+        </div>
+      )}
     </header>
   );
 }
 
-function Dropdown({ label, value, active, icon }: { label: string; value: string; active?: boolean; icon?: React.ReactNode }) {
+function Dropdown({
+  label,
+  value,
+  active,
+  icon,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  active?: boolean;
+  icon?: React.ReactNode;
+  options?: string[];
+  onChange?: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
   return (
-    <button className="dropdown-btn">
-      <span>{label}</span>
-      {active && <i />}
-      {icon}
-      <strong>{value}</strong>
-      <ChevronDown size={16} />
-    </button>
+    <div className="dropdown-wrap" onMouseLeave={() => setOpen(false)}>
+      <button className="dropdown-btn" onClick={() => setOpen(!open)}>
+        <span>{label}</span>
+        {active && <i />}
+        {icon}
+        <strong>{value}</strong>
+        <ChevronDown size={16} />
+      </button>
+      {open && options && (
+        <div className="dropdown-menu">
+          {options.map((option) => (
+            <button
+              key={option}
+              className={option === value ? "selected" : ""}
+              onClick={() => {
+                onChange?.(option);
+                setOpen(false);
+              }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -322,6 +440,9 @@ function GenerateScreenConnected({
   generatedAsset,
   onGenerated,
   apiStatus,
+  assets,
+  setGeneratedAsset,
+  refreshAssets,
 }: {
   quality: Quality;
   setQuality: (quality: Quality) => void;
@@ -335,13 +456,24 @@ function GenerateScreenConnected({
   setGeneratedAsset: (asset: BackendAsset | null) => void;
   onGenerated: (asset: BackendAsset) => Promise<void>;
   apiStatus: "checking" | "online" | "offline";
+  assets: BackendAsset[];
+  refreshAssets: () => Promise<void>;
 }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [previewPanel, setPreviewPanel] = useState<"glb" | "assets" | "archive" | "quality" | "package" | null>(null);
   const displayScore = generatedAsset?.quality_report?.overall_score || generatedAsset?.overall_quality_score || 92;
   const displayAssetName = generatedAsset ? `${generatedAsset.asset_id}.glb` : "asset_482742.glb";
+  const currentAssetIndex = generatedAsset ? assets.findIndex((asset) => asset.asset_id === generatedAsset.asset_id) : -1;
+
+  function selectRelativeAsset(direction: -1 | 1) {
+    if (assets.length === 0) return;
+    const current = currentAssetIndex >= 0 ? currentAssetIndex : 0;
+    const next = (current + direction + assets.length) % assets.length;
+    setGeneratedAsset(assets[next]);
+  }
 
   async function handleGenerate() {
     if (!sourceFile) {
@@ -392,7 +524,7 @@ function GenerateScreenConnected({
           <AssetRender kind="drone" compact />
           <div>
             <strong>{sourceFile?.name || "Choose source image"}</strong>
-            <p>{sourceFile ? `${Math.round(sourceFile.size / 1024)} KB · local upload · workflow input` : "PNG/JPG · local upload · workflow input"}</p>
+            <p>{sourceFile ? `${Math.round(sourceFile.size / 1024)} KB - local upload - workflow input` : "PNG/JPG - local upload - workflow input"}</p>
             <button className="small-btn" type="button"><Upload size={15} /> Replace Image</button>
           </div>
           <button className="ghost-icon" type="button" onClick={(event) => { event.stopPropagation(); setSourceFile(null); }}>
@@ -404,7 +536,7 @@ function GenerateScreenConnected({
         <PanelTitle number="2" title="Generation Settings" />
         <Segmented label="Quality" values={["Draft", "Balanced", "High"]} value={quality} onChange={(v) => setQuality(v as Quality)} />
         <Segmented label="Mesh Style" values={["Soft object", "Hard surface", "Product preview"]} value={meshStyle} onChange={(v) => setMeshStyle(v as MeshStyle)} />
-        <LabeledInput label="Seed" value={seed} onChange={setSeed} icon={<Cuboid size={17} />} />
+        <SeedControl value={seed} onChange={setSeed} />
         <label className="notes-field">
           <span>Notes <small>(optional)</small></span>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} />
@@ -418,92 +550,45 @@ function GenerateScreenConnected({
 
       <section className="panel preview-panel">
         <div className="panel-header">
-          <h3><Box size={18} /> Preview <span>· {displayAssetName}</span></h3>
-          <div className="header-actions"><button>GLB</button><button>•••</button></div>
+          <h3><Box size={18} /> Preview <span>- {displayAssetName}</span></h3>
+          <div className="header-actions">
+            <button onClick={() => setPreviewPanel(previewPanel === "glb" ? null : "glb")}>GLB</button>
+            <button onClick={() => {
+              selectRelativeAsset(1);
+              setPreviewPanel(previewPanel === "assets" ? null : "assets");
+            }}>{assets.length || 0} assets</button>
+          </div>
         </div>
         <div className="hero-preview">
           <ModelPreview asset={generatedAsset} kind={generatedAsset ? assetKind(generatedAsset) : "drone"} />
+          <button className="preview-nav previous" aria-label="Previous asset" onClick={() => selectRelativeAsset(-1)} disabled={assets.length < 2}><ChevronLeft size={20} /></button>
+          <button className="preview-nav next" aria-label="Next asset" onClick={() => selectRelativeAsset(1)} disabled={assets.length < 2}><ChevronRight size={20} /></button>
           <div className="axis-widget"><span>X</span><span>Y</span><span>Z</span></div>
           <div className="preview-tools">
-            <button><Archive size={18} /></button>
-            <button><Gauge size={18} /></button>
-            <button><Package size={18} /></button>
+            <button aria-label="Open asset files" onClick={() => setPreviewPanel(previewPanel === "archive" ? null : "archive")}><Archive size={18} /></button>
+            <button aria-label="Open quality diagnostics" onClick={() => setPreviewPanel(previewPanel === "quality" ? null : "quality")}><Gauge size={18} /></button>
+            <button aria-label="Open package contents" onClick={() => setPreviewPanel(previewPanel === "package" ? null : "package")}><Package size={18} /></button>
           </div>
-          <div className="preview-dots">{Array.from({ length: 7 }).map((_, i) => <i key={i} className={i === 0 ? "on" : ""} />)}</div>
+          {previewPanel && (
+            <div className="preview-info-panel">
+              <button aria-label="Close preview panel" onClick={() => setPreviewPanel(null)}><X size={15} /></button>
+              {previewPanel === "glb" && <><strong>GLB Preview</strong><p>Interactive browser preview uses the generated <code>asset.glb</code> through model-viewer.</p></>}
+              {previewPanel === "assets" && <><strong>Asset Switcher</strong><p>{assets.length || 0} generated assets are available. Use the left/right arrows to inspect another GLB.</p></>}
+              {previewPanel === "archive" && <><strong>Asset Files</strong><p>Generated outputs include GLB, metadata JSON, quality report, activity log, input image, and ZIP package.</p></>}
+              {previewPanel === "quality" && <><strong>Quality Diagnostics</strong><p>Rule-based demo scoring checks geometry, topology, material, metadata, and reproducibility signals.</p></>}
+              {previewPanel === "package" && <><strong>Package Contents</strong><p>The downloadable package is agent-ready: asset, metadata, quality report, and usage instructions together.</p></>}
+            </div>
+          )}
+          <div className="preview-dots">
+            {(assets.length ? assets.slice(0, 7) : Array.from({ length: 7 })).map((_, i) => (
+              <i key={i} className={i === Math.max(0, Math.min(currentAssetIndex, 6)) ? "on" : ""} />
+            ))}
+          </div>
         </div>
       </section>
 
-      <SummaryCards asset={generatedAsset} score={displayScore} />
+      <SummaryCards asset={generatedAsset} score={displayScore} onAssetChanged={onGenerated} refreshAssets={refreshAssets} />
       <ActivityTimeline activity={generatedAsset?.activity_log} />
-    </div>
-  );
-}
-
-function GenerateScreen({
-  quality,
-  setQuality,
-  meshStyle,
-  setMeshStyle,
-  seed,
-  setSeed,
-  notes,
-  setNotes,
-}: {
-  quality: Quality;
-  setQuality: (quality: Quality) => void;
-  meshStyle: MeshStyle;
-  setMeshStyle: (style: MeshStyle) => void;
-  seed: string;
-  setSeed: (seed: string) => void;
-  notes: string;
-  setNotes: (notes: string) => void;
-}) {
-  return (
-    <div className="generate-grid">
-      <section className="panel control-panel">
-        <PanelTitle number="1" title="Source Image" />
-        <div className="dropzone">
-          <AssetRender kind="drone" compact />
-          <div>
-            <strong>reference_object.png</strong>
-            <p>PNG · local upload · workflow input</p>
-            <button className="small-btn"><Upload size={15} /> Replace Image</button>
-          </div>
-          <button className="ghost-icon"><X size={17} /></button>
-          <span>Drag & drop an image here, or click to browse</span>
-        </div>
-
-        <PanelTitle number="2" title="Generation Settings" />
-        <Segmented label="Quality" values={["Draft", "Balanced", "High"]} value={quality} onChange={(v) => setQuality(v as Quality)} />
-        <Segmented label="Mesh Style" values={["Soft object", "Hard surface", "Product preview"]} value={meshStyle} onChange={(v) => setMeshStyle(v as MeshStyle)} />
-        <LabeledInput label="Seed" value={seed} onChange={setSeed} icon={<Cuboid size={17} />} />
-        <label className="notes-field">
-          <span>Notes <small>(optional)</small></span>
-          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} />
-          <em>{notes.length}/500</em>
-        </label>
-        <button className="primary-action"><Sparkles size={24} /> Generate 3D Asset</button>
-      </section>
-
-      <section className="panel preview-panel">
-        <div className="panel-header">
-          <h3><Box size={18} /> Preview <span>· asset_482742.glb</span></h3>
-          <div className="header-actions"><button>GLB</button><button>•••</button></div>
-        </div>
-        <div className="hero-preview">
-          <AssetRender kind="drone" />
-          <div className="axis-widget"><span>X</span><span>Y</span><span>Z</span></div>
-          <div className="preview-tools">
-            <button><Archive size={18} /></button>
-            <button><Gauge size={18} /></button>
-            <button><Package size={18} /></button>
-          </div>
-          <div className="preview-dots">{Array.from({ length: 7 }).map((_, i) => <i key={i} className={i === 0 ? "on" : ""} />)}</div>
-        </div>
-      </section>
-
-      <SummaryCards />
-      <ActivityTimeline />
     </div>
   );
 }
@@ -511,47 +596,127 @@ function GenerateScreen({
 function PanelTitle({ number, title }: { number: string; title: string }) {
   return (
     <div className="panel-title">
-      <b>{number}</b>
-      <h3>{title}</h3>
+      <span>{number}</span>
+      <strong>{title}</strong>
     </div>
   );
 }
 
-function Segmented({ label, values, value, onChange }: { label: string; values: string[]; value: string; onChange: (value: string) => void }) {
+function Segmented({
+  label,
+  values,
+  value,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div className="setting-row">
-      <label>{label}</label>
+    <div className="segmented-row">
+      <span>{label}</span>
       <div className="segmented">
         {values.map((item) => (
-          <button key={item} className={item === value ? "selected" : ""} onClick={() => onChange(item)}>
+          <button key={item} className={item === value ? "active" : ""} onClick={() => onChange(item)}>
             {item}
           </button>
         ))}
       </div>
-      <p>{value === "Balanced" ? "Balanced speed and detail for most use cases." : "Provider-aware deterministic demo setting."}</p>
     </div>
   );
 }
 
-function LabeledInput({ label, value, onChange, icon }: { label: string; value: string; onChange: (value: string) => void; icon: React.ReactNode }) {
+function SeedControl({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const numericValue = Number(value) || 1;
+  const randomize = () => onChange(String(Math.floor(Math.random() * 9999) + 1));
+
   return (
-    <label className="setting-row input-row">
-      <span>{label}</span>
-      <div className="input-shell">
-        <input value={value} onChange={(event) => onChange(event.target.value)} />
-        {icon}
+    <div className="setting-row seed-row">
+      <label>Seed</label>
+      <div className="seed-control">
+        <div className="seed-topline">
+          <input value={value} onChange={(event) => onChange(event.target.value.replace(/\D/g, "").slice(0, 6))} />
+          <button type="button" onClick={randomize}><Cuboid size={16} /> Random</button>
+        </div>
+        <input
+          className="seed-slider"
+          type="range"
+          min="1"
+          max="9999"
+          value={Math.min(9999, Math.max(1, numericValue))}
+          onChange={(event) => onChange(event.target.value)}
+        />
       </div>
-      <p>Reproducible output with deterministic seed.</p>
-    </label>
+      <p>Seed controls deterministic variation. Same image + settings + seed gives a reproducible demo mesh.</p>
+    </div>
   );
 }
 
-function SummaryCards({ asset, score = 92 }: { asset?: BackendAsset | null; score?: number }) {
+function SummaryCards({
+  asset,
+  score = 92,
+  onAssetChanged,
+  refreshAssets,
+}: {
+  asset?: BackendAsset | null;
+  score?: number;
+  onAssetChanged?: (asset: BackendAsset) => Promise<void>;
+  refreshAssets?: () => Promise<void>;
+}) {
+  const [exportOpen, setExportOpen] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [feedback, setFeedback] = useState("Make it more hard-surface, reduce complexity, keep similar shape.");
+  const [busyAction, setBusyAction] = useState("");
   const quality = asset?.quality_report || {};
   const openFile = (path?: string | null) => {
     const url = fileUrl(path);
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
+  const readiness = asset?.production_readiness || [
+    { label: "GLB generated", status: "pass" },
+    { label: "Metadata exported", status: "pass" },
+    { label: "Quality report generated", status: "pass" },
+    { label: "Asset package created", status: "pass" },
+    { label: "Reproducible seed saved", status: "pass" },
+    { label: "Human review required", status: "warning" },
+    { label: "Not verified in game engine", status: "warning" },
+    { label: "Demo provider, not real image-to-3D model", status: "warning" },
+  ];
+
+  async function updateReview(reviewStatus: string) {
+    if (!asset) return;
+    setBusyAction(reviewStatus);
+    const form = new FormData();
+    form.append("review_status", reviewStatus);
+    form.append("review_notes", reviewNotes || asset.review_notes || "");
+    const response = await fetch(`${API_BASE}/api/assets/${asset.asset_id}/review`, { method: "POST", body: form });
+    setBusyAction("");
+    if (!response.ok) return;
+    await onAssetChanged?.(await response.json());
+  }
+
+  async function regenerateWithFeedback() {
+    if (!asset) return;
+    setBusyAction("regenerate");
+    const form = new FormData();
+    form.append("feedback", feedback);
+    form.append("seed", String((asset.seed || 482742) + 1));
+    const response = await fetch(`${API_BASE}/api/assets/${asset.asset_id}/regenerate`, { method: "POST", body: form });
+    setBusyAction("");
+    if (!response.ok) return;
+    await onAssetChanged?.(await response.json());
+  }
+
+  async function replayRun() {
+    if (!asset) return;
+    setBusyAction("replay");
+    const response = await fetch(`${API_BASE}/api/assets/${asset.asset_id}/replay`, { method: "POST" });
+    setBusyAction("");
+    if (!response.ok) return;
+    await onAssetChanged?.(await response.json());
+    await refreshAssets?.();
+  }
 
   return (
     <section className="summary-grid">
@@ -561,6 +726,7 @@ function SummaryCards({ asset, score = 92 }: { asset?: BackendAsset | null; scor
           <dt>Provider</dt><dd>{asset?.provider_name || "Local Demo"}</dd>
           <dt>Backend</dt><dd>{asset?.model_backend || "procedural-glb-demo"}</dd>
           <dt>Status</dt><dd>{asset?.status || "Ready"}</dd>
+          <dt>Review</dt><dd>{asset?.review_status || "Needs Review"}</dd>
           <dt>Generated</dt><dd>{formatDate(asset?.created_at)}</dd>
           <dt>Package</dt><dd>GLB + JSON + ZIP</dd>
         </dl>
@@ -590,7 +756,76 @@ function SummaryCards({ asset, score = 92 }: { asset?: BackendAsset | null; scor
         <h3>Download</h3>
         <p>Download the asset or the complete package with metadata and quality report.</p>
         <button className="download-main" onClick={() => openFile(asset?.urls?.glb)} disabled={!asset?.urls?.glb}><Download size={20} /> Download GLB</button>
-        <button className="export-btn" onClick={() => openFile(asset?.urls?.package_zip)} disabled={!asset?.urls?.package_zip}><Package size={18} /> Download Asset Package <ChevronDown size={16} /></button>
+        <div className="export-menu-wrap">
+          <button className="export-btn" onClick={() => setExportOpen(!exportOpen)} disabled={!asset}><Package size={18} /> Export Options <ChevronDown size={16} /></button>
+          {exportOpen && (
+            <div className="export-menu">
+              <button onClick={() => openFile(asset?.urls?.package_zip)} disabled={!asset?.urls?.package_zip}>Complete ZIP package</button>
+              <button onClick={() => openFile(asset?.urls?.metadata)} disabled={!asset?.urls?.metadata}>metadata.json</button>
+              <button onClick={() => openFile(asset?.urls?.quality_report)} disabled={!asset?.urls?.quality_report}>quality_report.json</button>
+              <button onClick={() => openFile(asset?.urls?.activity_log)} disabled={!asset?.urls?.activity_log}>activity_log.json</button>
+              <button onClick={() => openFile(asset?.urls?.manifest)} disabled={!asset?.urls?.manifest}>manifest.json</button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="panel review-card">
+        <h3>Human Review</h3>
+        <p>Approve, reject, or send the asset back for regeneration before downstream handoff.</p>
+        <div className="review-status-row">
+          {["Draft", "Needs Review", "Approved", "Rejected", "Final"].map((status) => (
+            <button
+              key={status}
+              className={status === (asset?.review_status || "Needs Review") ? "active" : ""}
+              onClick={() => updateReview(status)}
+              disabled={!asset || busyAction === status}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={reviewNotes || asset?.review_notes || ""}
+          onChange={(event) => setReviewNotes(event.target.value)}
+          placeholder="Add review notes for this asset..."
+        />
+        <button className="secondary-action" onClick={() => updateReview(asset?.review_status || "Needs Review")} disabled={!asset || !!busyAction}>Save Review Notes</button>
+      </div>
+      <div className="panel readiness-card">
+        <h3>Production Readiness</h3>
+        <div className="readiness-list">
+          {readiness.map((item) => (
+            <div key={item.label} className={item.status}>
+              <span>{item.status === "pass" ? "✓" : item.status === "warning" ? "!" : "×"}</span>
+              <strong>{item.label}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="panel gates-card">
+        <h3>Evaluation Gates</h3>
+        <p>{asset?.quality_gates?.status || "Waiting for generated asset"}</p>
+        <div className="gate-list">
+          {(asset?.quality_gates?.checks || []).map((check) => (
+            <div key={check.label} className={check.passed ? "pass" : "fail"}>
+              <span>{check.passed ? "OK" : "Gate"}</span>
+              <strong>{check.label}</strong>
+              {check.value !== undefined && <em>{String(check.value)}</em>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="panel regeneration-card">
+        <h3>Regenerate with Feedback</h3>
+        <p>Create a new version linked to this asset with parent_asset_id, feedback, and regeneration_reason saved in metadata.</p>
+        <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+        <button className="primary-action" onClick={regenerateWithFeedback} disabled={!asset || busyAction === "regenerate"}>
+          <Sparkles size={20} /> {busyAction === "regenerate" ? "Regenerating..." : "Regenerate Variant"}
+        </button>
+        <button className="secondary-action" onClick={replayRun} disabled={!asset || busyAction === "replay"}>
+          <Play size={17} /> {busyAction === "replay" ? "Replaying..." : "Replay Run"}
+        </button>
+        {asset?.parent_asset_id && <small>Parent asset: {asset.parent_asset_id}</small>}
       </div>
     </section>
   );
@@ -655,8 +890,8 @@ function ModelPreview({ asset, kind, compact }: { asset?: BackendAsset | null; k
       shadow-intensity="0.55"
       environment-image="neutral"
       exposure="1"
-      camera-orbit="38deg 62deg 6m"
-      field-of-view="28deg"
+      camera-orbit="35deg 62deg 4.2m"
+      field-of-view="22deg"
       interaction-prompt="none"
     />
   );
@@ -667,28 +902,40 @@ function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setS
     const url = fileUrl(path);
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
+  const [search, setSearch] = useState("");
+  const [meshFilter, setMeshFilter] = useState("All");
+  const [providerFilter, setProviderFilter] = useState("All Providers");
+  const [projectFilter, setProjectFilter] = useState("All Projects");
+
+  const filteredAssets = assets.filter((asset) => {
+    const searchable = `${asset.name} ${asset.id} ${asset.style} ${asset.provider}`.toLowerCase();
+    const searchHit = searchable.includes(search.toLowerCase());
+    const meshHit = meshFilter === "All" || asset.style.toLowerCase().includes(meshFilter.toLowerCase().replace(" surface", ""));
+    const providerHit = providerFilter === "All Providers" || asset.provider.toLowerCase().includes(providerFilter.toLowerCase().replace(" provider", ""));
+    return searchHit && meshHit && providerHit && projectFilter.length > 0;
+  });
 
   return (
     <div className="assets-layout">
       <section className="assets-main">
         <div className="asset-toolbar">
-          <div className="search"><Search size={18} /><input placeholder="Search assets..." /><span>⌘K</span></div>
-          <Dropdown label="Provider" value="Local Demo" active />
-          <Dropdown label="Project" value="Sci-Fi Drone" icon={<Folder size={16} />} />
+          <div className="search"><Search size={18} /><input placeholder="Search assets..." value={search} onChange={(event) => setSearch(event.target.value)} /><span>Ctrl K</span></div>
+          <Dropdown label="Provider" value={providerFilter === "All Providers" ? "Local Demo" : providerFilter} active options={["All Providers", "Local Demo Provider", "TRELLIS", "TripoSR"]} onChange={setProviderFilter} />
+          <Dropdown label="Project" value={projectFilter === "All Projects" ? "Sci-Fi Drone" : projectFilter} icon={<Folder size={16} />} options={["All Projects", "Sci-Fi Drone", "Product Preview", "Internal Demo"]} onChange={setProjectFilter} />
         </div>
         <div className="asset-title-row">
           <div><h2>Assets</h2><p>Browse and manage your generated 3D assets.</p></div>
-          <span>{assets.length} assets</span>
+          <span>{filteredAssets.length} / {assets.length} assets</span>
         </div>
         <div className="asset-content">
           <aside className="filters panel">
-            <h3>Filters <button>Clear all</button></h3>
-            <FilterGroup title="Project" items={["All Projects"]} />
-            <FilterGroup title="Mesh Style" items={["All", "Hard Surface", "Organic", "Stylized", "Environment"]} chips />
-            <FilterGroup title="Provider" items={["All Providers", "Local Demo", "TRELLIS", "TripoSR"]} checks />
+            <h3>Filters <button onClick={() => { setSearch(""); setMeshFilter("All"); setProviderFilter("All Providers"); setProjectFilter("All Projects"); }}>Clear all</button></h3>
+            <FilterGroup title="Project" items={["All Projects", "Sci-Fi Drone", "Product Preview", "Internal Demo"]} value={projectFilter} onChange={setProjectFilter} />
+            <FilterGroup title="Mesh Style" items={["All", "Hard Surface", "Product Preview", "Soft Object", "Environment"]} value={meshFilter} onChange={setMeshFilter} chips />
+            <FilterGroup title="Provider" items={["All Providers", "Local Demo Provider", "TRELLIS", "TripoSR"]} value={providerFilter} onChange={setProviderFilter} checks />
           </aside>
           <div className="asset-grid">
-            {assets.map((asset) => (
+            {filteredAssets.map((asset) => (
               <button key={asset.id} className={`asset-card panel ${selected.id === asset.id ? "selected" : ""}`} onClick={() => setSelected(asset)}>
                 <AssetRender kind={asset.kind} card />
                 <strong>{asset.name}</strong>
@@ -696,6 +943,12 @@ function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setS
                 <div><i /> {asset.provider}<em>{asset.score} /100</em></div>
               </button>
             ))}
+            {filteredAssets.length === 0 && (
+              <div className="empty-results panel">
+                <strong>No assets match these filters</strong>
+                <span>Clear filters or generate another asset.</span>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -706,6 +959,17 @@ function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setS
         <div className="inspector-grid">
           <div className="panel metric-panel"><h3>Quality Score</h3><ScoreRing score={selected.score} /></div>
           <div className="panel details-panel"><h3>Asset Details</h3><dl><dt>Mesh Style</dt><dd>{selected.style}</dd><dt>Provider</dt><dd>{selected.provider}</dd><dt>File Size</dt><dd>{selected.backend?.file_size_bytes ? `${Math.round(selected.backend.file_size_bytes / 1024)} KB` : "Demo"}</dd><dt>Status</dt><dd>{selected.backend?.status || "Completed"}</dd></dl></div>
+          <div className="panel storage-panel">
+            <h3>Storage Inspector</h3>
+            {(selected.backend?.storage?.files || []).map((file) => (
+              <div key={file.name} className={file.exists ? "ok" : "missing"}>
+                <span>{file.exists ? "OK" : "Missing"}</span>
+                <strong>{file.name}</strong>
+                <em>{file.size_bytes ? `${Math.round(file.size_bytes / 1024)} KB` : "-"}</em>
+                {file.sha256 && <small>SHA256 {file.sha256.slice(0, 12)}...</small>}
+              </div>
+            ))}
+          </div>
           <div className="panel export-panel">
             <h3>Download & Export</h3>
             <button className="download-main" onClick={() => openFile(selected.backend?.urls?.glb)} disabled={!selected.backend?.urls?.glb}><Download size={18} /> Download GLB</button>
@@ -717,14 +981,27 @@ function AssetsScreen({ selected, setSelected, assets }: { selected: Asset; setS
     </div>
   );
 }
-
-function FilterGroup({ title, items, chips, checks }: { title: string; items: string[]; chips?: boolean; checks?: boolean }) {
+function FilterGroup({
+  title,
+  items,
+  value,
+  onChange,
+  chips,
+  checks,
+}: {
+  title: string;
+  items: string[];
+  value: string;
+  onChange: (value: string) => void;
+  chips?: boolean;
+  checks?: boolean;
+}) {
   return (
     <div className="filter-group">
       <h4>{title}</h4>
       <div className={chips ? "chip-list" : "check-list"}>
-        {items.map((item, index) => (
-          <button key={item} className={index === 0 ? "selected" : ""}>
+        {items.map((item) => (
+          <button key={item} className={item === value ? "selected" : ""} onClick={() => onChange(item)}>
             {checks && <i />} {item}
           </button>
         ))}
@@ -733,7 +1010,117 @@ function FilterGroup({ title, items, chips, checks }: { title: string; items: st
   );
 }
 
+function ObservabilityScreen({
+  assets,
+  refreshAssets,
+  setGeneratedAsset,
+  setScreen,
+}: {
+  assets: BackendAsset[];
+  refreshAssets: () => Promise<void>;
+  setGeneratedAsset: (asset: BackendAsset | null) => void;
+  setScreen: (screen: Screen) => void;
+}) {
+  const [summary, setSummary] = useState<any>(null);
+  const [loadingDemo, setLoadingDemo] = useState(false);
+
+  async function loadSummary() {
+    const response = await fetch(`${API_BASE}/api/observability`);
+    if (response.ok) setSummary(await response.json());
+  }
+
+  async function loadDemoProject() {
+    setLoadingDemo(true);
+    const response = await fetch(`${API_BASE}/api/demo-project`, { method: "POST" });
+    setLoadingDemo(false);
+    if (response.ok) {
+      const payload = await response.json();
+      await refreshAssets();
+      setGeneratedAsset(payload.created?.[0] || null);
+      await loadSummary();
+    }
+  }
+
+  useEffect(() => {
+    void loadSummary();
+  }, [assets.length]);
+
+  const totalStorageMb = summary ? (summary.total_storage_bytes / (1024 * 1024)).toFixed(2) : "0.00";
+  const latest = assets[0];
+
+  return (
+    <div className="observability-layout">
+      <section className="panel observability-hero">
+        <div>
+          <h2>Workflow Observability</h2>
+          <p>Track local generation runs, quality gates, storage usage, replayability, and demo project readiness.</p>
+        </div>
+        <button className="primary-action" onClick={loadDemoProject} disabled={loadingDemo}>
+          <Sparkles size={20} /> {loadingDemo ? "Loading demo..." : "Load Demo Project"}
+        </button>
+      </section>
+
+      <section className="observability-grid">
+        <MetricTile label="Total runs" value={summary?.total_runs ?? assets.length} />
+        <MetricTile label="Success rate" value={`${summary?.success_rate ?? 0}%`} />
+        <MetricTile label="Average quality" value={summary?.average_quality_score ?? 0} />
+        <MetricTile label="Failed gates" value={summary?.failed_quality_gates ?? 0} />
+        <MetricTile label="Storage used" value={`${totalStorageMb} MB`} />
+        <MetricTile label="Most used preset" value={summary?.most_used_preset ?? "None"} />
+      </section>
+
+      <section className="panel replay-panel">
+        <h3>Run Replay</h3>
+        <p>Replay the latest run from saved metadata: input image, provider, quality, mesh style, seed, and notes.</p>
+        <dl>
+          <dt>Latest run</dt><dd>{latest?.asset_id || "No asset yet"}</dd>
+          <dt>Seed</dt><dd>{latest?.seed || "-"}</dd>
+          <dt>Provider</dt><dd>{latest?.provider_name || "-"}</dd>
+          <dt>Input hash</dt><dd>{latest?.checksums?.input_sha256?.slice(0, 18) || "-"}</dd>
+        </dl>
+        <button className="secondary-action" disabled={!latest} onClick={async () => {
+          if (!latest) return;
+          const response = await fetch(`${API_BASE}/api/assets/${latest.asset_id}/replay`, { method: "POST" });
+          if (response.ok) {
+            setGeneratedAsset(await response.json());
+            await refreshAssets();
+            setScreen("generate");
+          }
+        }}>Replay Latest Run</button>
+      </section>
+
+      <section className="panel gate-overview">
+        <h3>Quality Gate Overview</h3>
+        {(assets.slice(0, 5)).map((asset) => (
+          <div key={asset.asset_id} className={asset.quality_gates?.passed ? "pass" : "fail"}>
+            <strong>{asset.asset_id}</strong>
+            <span>{asset.quality_gates?.status || "Not evaluated"}</span>
+            <em>{asset.overall_quality_score || 0}/100</em>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="panel metric-tile">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function AgentsScreen() {
+  const [runState, setRunState] = useState<"idle" | "running" | "completed">("idle");
+  const [selectedTool, setSelectedTool] = useState("generate_3d_asset");
+
+  function runTool() {
+    setRunState("running");
+    window.setTimeout(() => setRunState("completed"), 850);
+  }
+
   return (
     <div className="agents-layout">
       <section className="agents-main">
@@ -741,7 +1128,7 @@ function AgentsScreen() {
           <div>
             <h2>Agent Mode</h2>
             <p>Use the generate_3d_asset tool to create governed GLB asset packages with metadata and diagnostics.</p>
-            <div className="tool-pill"><span>Tool</span><strong>generate_3d_asset</strong><em>Stable</em></div>
+            <div className="tool-pill"><span>Tool</span><strong>{selectedTool}</strong><em>{runState === "running" ? "Running" : "Stable"}</em></div>
           </div>
           <div className="agent-cube"><Layers3 size={82} /></div>
         </div>
@@ -758,8 +1145,17 @@ function AgentsScreen() {
         <button className="file-row"><FileJson size={20} /> metadata.json <span>View</span></button>
         <button className="file-row"><ShieldCheck size={20} /> quality_report.json <span>View</span></button>
         <div className="panel metric-panel"><ScoreRing score={92} /></div>
-        <button className="primary-action"><Play size={20} /> Run Tool</button>
-        <button className="secondary-action">Simulate Agent Run</button>
+        {runState !== "idle" && (
+          <div className={`agent-run-state ${runState}`}>
+            <strong>{runState === "running" ? "Running agent workflow..." : "Agent run completed"}</strong>
+            <span>{runState === "running" ? "Validating input schema, provider limits, and package output." : "Generated demo run with metadata, quality report, and package delivery."}</span>
+          </div>
+        )}
+        <button className="primary-action" onClick={runTool} disabled={runState === "running"}><Play size={20} /> {runState === "running" ? "Running..." : "Run Tool"}</button>
+        <button className="secondary-action" onClick={() => {
+          setSelectedTool(selectedTool === "generate_3d_asset" ? "validate_asset_package" : "generate_3d_asset");
+          setRunState("idle");
+        }}>Switch Tool</button>
       </aside>
     </div>
   );
@@ -790,16 +1186,46 @@ function ProvidersScreen() {
 }
 
 function SettingsScreen() {
+  const [settings, setSettings] = useState({
+    darkOnly: true,
+    savePackages: true,
+    strictDisclosure: true,
+    agentMode: true,
+  });
+  const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] }));
+
   return (
-    <section className="panel settings-panel">
-      <h2>Settings / About</h2>
-      <p>This product UI is a premium frontend shell for Agentic 3D Asset Studio. The active generation provider remains the deterministic Local Demo Provider.</p>
-      <div className="settings-grid">
-        <div><strong>Current mode</strong><span>Dark-only cockpit UI</span></div>
-        <div><strong>Backend claim</strong><span>Workflow layer, not foundation model</span></div>
-        <div><strong>Outputs</strong><span>GLB, metadata, quality report, package ZIP</span></div>
-      </div>
-    </section>
+    <div className="settings-layout">
+      <section className="panel settings-panel">
+        <h2>Settings / About</h2>
+        <p>Agentic 3D Asset Studio is a premium workflow layer for agent-ready 3D asset generation. The active provider is deterministic local demo generation, not a foundation image-to-3D model.</p>
+        <div className="settings-grid">
+          <div><strong>Current mode</strong><span>Dark-only cockpit UI</span></div>
+          <div><strong>Backend claim</strong><span>Workflow layer, not foundation model</span></div>
+          <div><strong>Outputs</strong><span>GLB, metadata, quality report, package ZIP</span></div>
+          <div><strong>Workspace</strong><span>Local outputs under outputs/assets</span></div>
+        </div>
+      </section>
+
+      <section className="panel settings-panel">
+        <h2>Workspace Controls</h2>
+        <div className="settings-list">
+          <button onClick={() => toggle("darkOnly")}><span>Dark-only product UI</span><strong>{settings.darkOnly ? "Enabled" : "Disabled"}</strong></button>
+          <button onClick={() => toggle("savePackages")}><span>Save ZIP packages</span><strong>{settings.savePackages ? "Enabled" : "Disabled"}</strong></button>
+          <button onClick={() => toggle("strictDisclosure")}><span>Provider disclosure guardrail</span><strong>{settings.strictDisclosure ? "Strict" : "Relaxed"}</strong></button>
+          <button onClick={() => toggle("agentMode")}><span>Agent-readable outputs</span><strong>{settings.agentMode ? "Enabled" : "Disabled"}</strong></button>
+        </div>
+      </section>
+
+      <section className="panel settings-panel">
+        <h2>Provider Roadmap</h2>
+        <div className="roadmap-list">
+          {["TRELLIS adapter", "TripoSR adapter", "Stable Fast 3D adapter", "InstantMesh adapter", "Three.js inspection tools"].map((item, index) => (
+            <div key={item}><span>{index + 1}</span><strong>{item}</strong><em>{index === 0 ? "next" : "planned"}</em></div>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -816,3 +1242,4 @@ function AssetRender({ kind, compact, card }: { kind: Asset["kind"]; compact?: b
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
+

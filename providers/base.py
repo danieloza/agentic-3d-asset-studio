@@ -20,6 +20,9 @@ class AssetGenerationRequest:
     mesh_style: MeshStyle
     seed: int
     notes: str = ""
+    parent_asset_id: str | None = None
+    feedback: str = ""
+    regeneration_reason: str | None = None
 
 
 @dataclass(frozen=True)

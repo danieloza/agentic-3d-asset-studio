@@ -51,6 +51,10 @@ class LocalDemoProvider:
 
         activity_log: list[dict] = []
         self._log(activity_log, "image_uploaded", "Input image accepted")
+        if request.parent_asset_id:
+            self._log(activity_log, "regeneration_requested", f"Parent asset: {request.parent_asset_id}")
+        if request.feedback:
+            self._log(activity_log, "feedback_captured", request.feedback.strip())
 
         input_image_path = asset_dir / "input.png"
         self._copy_input_image(request.input_image, input_image_path)
@@ -102,12 +106,28 @@ class LocalDemoProvider:
         agent_instructions_path = asset_dir / "agent_instructions.md"
         agent_instructions_path.write_text(self._package_instructions(asset_id), encoding="utf-8")
 
+        manifest_path = asset_dir / "manifest.json"
+        manifest = self._manifest(
+            asset_id=asset_id,
+            created_at=created_at,
+            files=[glb_path, metadata_path, quality_report_path, input_image_path, agent_instructions_path, activity_log_path],
+            request=request,
+            provider_name=self.name,
+        )
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        metadata["manifest_path"] = str(manifest_path)
+        metadata["checksums"] = manifest["checksums"]
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
         package_zip_path = asset_dir / "package.zip"
         self._create_package(
             package_zip_path=package_zip_path,
-            files=[glb_path, metadata_path, quality_report_path, input_image_path, agent_instructions_path, activity_log_path],
+            files=[glb_path, metadata_path, quality_report_path, input_image_path, agent_instructions_path, activity_log_path, manifest_path],
         )
+        manifest["checksums"]["package_sha256"] = self._sha256(package_zip_path)
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         metadata["package_zip_path"] = str(package_zip_path)
+        metadata["checksums"] = manifest["checksums"]
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         self._log(activity_log, "zip_package_created", "package.zip created")
         self._log(activity_log, "completed", "Generation completed")
@@ -270,6 +290,9 @@ class LocalDemoProvider:
             "mesh_style": request.mesh_style,
             "seed": request.seed,
             "notes": request.notes.strip(),
+            "parent_asset_id": request.parent_asset_id,
+            "feedback": request.feedback.strip(),
+            "regeneration_reason": request.regeneration_reason,
             "dominant_color": dominant_color_hex,
             "glb_path": str(glb_path),
             "metadata_path": str(metadata_path),
@@ -277,12 +300,56 @@ class LocalDemoProvider:
             "package_zip_path": str(package_zip_path),
             "file_size_bytes": file_size,
             "status": "completed",
+            "review_status": "Needs Review",
+            "review_notes": "",
+            "production_readiness": self._production_readiness(),
             "overall_quality_score": quality_report["overall_score"],
             "limitations": (
                 "This local provider generates deterministic demo GLB files and does not run "
                 "a foundation image-to-3D model."
             ),
             "future_backends": FUTURE_BACKENDS,
+        }
+
+    def _production_readiness(self) -> list[dict]:
+        return [
+            {"label": "GLB generated", "status": "pass"},
+            {"label": "Metadata exported", "status": "pass"},
+            {"label": "Quality report generated", "status": "pass"},
+            {"label": "Asset package created", "status": "pass"},
+            {"label": "Reproducible seed saved", "status": "pass"},
+            {"label": "Human review required", "status": "warning"},
+            {"label": "Not verified in game engine", "status": "warning"},
+            {"label": "Demo provider, not real image-to-3D model", "status": "warning"},
+        ]
+
+    def _sha256(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _manifest(
+        self,
+        asset_id: str,
+        created_at: datetime,
+        files: list[Path],
+        request: AssetGenerationRequest,
+        provider_name: str,
+    ) -> dict:
+        checksums = {f"{file_path.stem}_sha256": self._sha256(file_path) for file_path in files if file_path.exists()}
+        return {
+            "asset_id": asset_id,
+            "created_at": created_at.isoformat(),
+            "provider": provider_name,
+            "provider_type": self.provider_type,
+            "review_status": "Needs Review",
+            "parent_asset_id": request.parent_asset_id,
+            "feedback": request.feedback.strip(),
+            "regeneration_reason": request.regeneration_reason,
+            "files": [file_path.name for file_path in files if file_path.exists()],
+            "checksums": checksums,
         }
 
     def _package_instructions(self, asset_id: str) -> str:

@@ -9,7 +9,18 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from asset_generator import GenerationRequest, generate_asset, get_asset, load_assets
+from PIL import Image
+
+from asset_generator import (
+    GenerationRequest,
+    evaluate_quality_gates,
+    generate_asset,
+    get_asset,
+    inspect_storage,
+    load_assets,
+    observability_summary,
+    replay_asset,
+)
 
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -65,11 +76,15 @@ def _asset_payload(metadata: dict) -> dict:
 
     quality_report = _read_json(metadata.get("quality_report_path"), {})
     activity_log = _read_json(metadata.get("activity_log_path"), [])
+    quality_gates = evaluate_quality_gates(metadata, quality_report)
+    storage = inspect_storage(metadata)
 
     return {
         **metadata,
         "quality_report": quality_report,
         "activity_log": activity_log,
+        "quality_gates": quality_gates,
+        "storage": storage,
         "urls": {
             "glb": _url_for_path(metadata.get("glb_path")),
             "metadata": _url_for_path(metadata.get("metadata_path")),
@@ -77,6 +92,7 @@ def _asset_payload(metadata: dict) -> dict:
             "package_zip": _url_for_path(metadata.get("package_zip_path")),
             "input_image": _url_for_path(metadata.get("input_image")),
             "activity_log": _url_for_path(metadata.get("activity_log_path")),
+            "manifest": _url_for_path(metadata.get("manifest_path")),
         },
     }
 
@@ -103,6 +119,54 @@ def read_asset(asset_id: str) -> dict:
     return _asset_payload(metadata)
 
 
+@app.get("/api/assets/{asset_id}/quality-gates")
+def read_quality_gates(asset_id: str) -> dict:
+    metadata = get_asset(asset_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return evaluate_quality_gates(metadata, _read_json(metadata.get("quality_report_path"), {}))
+
+
+@app.post("/api/assets/{asset_id}/replay")
+def replay_run(asset_id: str) -> dict:
+    try:
+        result = replay_asset(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    return _asset_payload(result.metadata)
+
+
+@app.get("/api/observability")
+def read_observability() -> dict:
+    return observability_summary()
+
+
+@app.post("/api/demo-project")
+def load_demo_project() -> dict:
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    demo_specs = [
+        ("demo_drone.png", (38, 129, 220), "Hard surface", 7001),
+        ("demo_product.png", (130, 77, 230), "Product preview", 7002),
+        ("demo_core.png", (20, 190, 150), "Soft object", 7003),
+    ]
+    created = []
+    for filename, color, mesh_style, seed in demo_specs:
+        image_path = UPLOAD_ROOT / filename
+        if not image_path.exists():
+            Image.new("RGB", (96, 96), color).save(image_path)
+        result = generate_asset(
+            GenerationRequest(
+                image_path=str(image_path),
+                quality="Balanced",
+                seed=seed,
+                mesh_style=mesh_style,
+                notes="One-click portfolio demo project seed asset.",
+            )
+        )
+        created.append(_asset_payload(result.metadata))
+    return {"created": created, "assets": [_asset_payload(asset) for asset in load_assets()]}
+
+
 @app.post("/api/generate")
 async def create_asset(
     image: UploadFile = File(...),
@@ -110,6 +174,9 @@ async def create_asset(
     mesh_style: str = Form("Product preview"),
     seed: int = Form(482742),
     notes: str = Form(""),
+    parent_asset_id: str | None = Form(None),
+    feedback: str = Form(""),
+    regeneration_reason: str | None = Form(None),
 ) -> dict:
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Upload must be an image file")
@@ -128,6 +195,74 @@ async def create_asset(
             seed=seed,
             mesh_style=mesh_style,
             notes=notes,
+            parent_asset_id=parent_asset_id,
+            feedback=feedback,
+            regeneration_reason=regeneration_reason,
+        )
+    )
+    return _asset_payload(result.metadata)
+
+
+@app.post("/api/assets/{asset_id}/review")
+async def update_review(
+    asset_id: str,
+    review_status: str = Form("Needs Review"),
+    review_notes: str = Form(""),
+) -> dict:
+    metadata = get_asset(asset_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    allowed = {"Draft", "Needs Review", "Approved", "Rejected", "Final"}
+    if review_status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid review status")
+
+    metadata["review_status"] = review_status
+    metadata["review_notes"] = review_notes.strip()
+    metadata_path = Path(metadata["metadata_path"])
+    if not metadata_path.is_absolute():
+        metadata_path = PROJECT_ROOT / metadata_path
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    manifest_path_value = metadata.get("manifest_path")
+    if manifest_path_value:
+        manifest_path = Path(manifest_path_value)
+        if not manifest_path.is_absolute():
+            manifest_path = PROJECT_ROOT / manifest_path
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["review_status"] = review_status
+            manifest["review_notes"] = review_notes.strip()
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    return _asset_payload(metadata)
+
+
+@app.post("/api/assets/{asset_id}/regenerate")
+async def regenerate_asset(
+    asset_id: str,
+    feedback: str = Form(""),
+    seed: int | None = Form(None),
+) -> dict:
+    metadata = get_asset(asset_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    input_image = metadata.get("input_image")
+    if not input_image:
+        raise HTTPException(status_code=400, detail="Asset has no input image")
+
+    next_seed = int(seed if seed is not None else int(metadata.get("seed", 482742)) + 1)
+    result = generate_asset(
+        GenerationRequest(
+            image_path=input_image,
+            quality=metadata.get("quality_preset", "Balanced"),
+            seed=next_seed,
+            mesh_style=metadata.get("mesh_style", "Product preview"),
+            notes=metadata.get("notes", ""),
+            parent_asset_id=asset_id,
+            feedback=feedback,
+            regeneration_reason="user_feedback",
         )
     )
     return _asset_payload(result.metadata)
