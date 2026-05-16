@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.codex/**/__pycache__/
 .gradio/
 outputs/
 .env
